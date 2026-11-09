@@ -4,6 +4,10 @@ Hardened rebuilds of ten popular "agent tool" ideas that are useful but weak on 
 project that chains all ten in a single agent run and proves each works and each attack is stopped.
 TypeScript, zero runtime dependencies, 127 tests, `npm audit` clean.
 
+![demo](docs/demo.png)
+
+**See it run:** `npm run demo`, then open http://127.0.0.1:4173 (local only). One click runs all 20 checks and the agent pipeline live, and you can paste your own URL, text, skill or SQL into the four playgrounds.
+
 **Proof, not claims:** run `npm run showcase` and read [SHOWCASE_REPORT.md](SHOWCASE_REPORT.md): 10/10 legitimate uses work, 10/10 attacks are stopped, and a 9-step end-to-end pipeline passes.
 
 | Module | Idea it replaces | The risk we removed |
