@@ -7,6 +7,7 @@ import path from "node:path";
 import { ApprovalGate, GateError } from "../src/approval-gate";
 import { createClient, ReadOnlyError } from "../src/bybit-readonly";
 import { handleEvent, verifySignature } from "../src/ig-webhook";
+import { checkSite } from "../src/site-check";
 import { scanProject, verdict as launchVerdict } from "../src/launch-check";
 import { NoEligibleProviderError, Router, redact, type Sensitivity } from "../src/llm-router";
 import { LocalIndex } from "../src/local-index";
@@ -203,9 +204,23 @@ export const TRY: TryDef[] = [
       return { verdict: refused ? "blocked" : "allowed", headline: refused ? "The gate stopped it." : "Published, because a human approved exactly this text.", rows };
     } },
 
-  { id: "launch-check", network: false, button: "Check", intro: "Paste a Supabase migration (SQL), a config file or front-end code. The checker flags tables anyone can read or change, open policies, leaked keys and similar launch blockers.",
-    fields: [{ name: "path", label: "File name", kind: "text", max: 100, value: "supabase/migrations/001_clients.sql" }, { name: "text", label: "File content", kind: "textarea", max: 20000, value: "create table public.clients (id int primary key, email text, notes text);\ngrant all on public.clients to anon;\ncreate policy \"open\" on public.clients for update using (true);" }],
-    async run(i) { const p = /^[\w./@-]{1,100}$/.test(i.path) ? i.path : "pasted.sql"; const f = scanProject([{ path: p, text: i.text }]); const v = launchVerdict(f); return { verdict: v === "pass" ? "allowed" : "blocked", headline: `Verdict: ${v.toUpperCase()}`, rows: f.length ? f.slice(0, 30).map((x) => [`line ${x.line} [${x.severity}]`, `${x.rule}: ${x.message}`] as [string, string]) : [["Findings", "none"]] }; } },
+  { id: "launch-check", network: true, button: "Check", intro: "Two checks. Check a live website: enter a public link and get a security score and a launch-readiness score (headers, leaked .env or keys in the page's scripts, source maps, SEO, legal pages). Or paste a Supabase migration or front-end code to find open tables and leaked keys.",
+    fields: [{ name: "action", label: "What to check", kind: "select", max: 30, value: "Live website", options: ["Live website", "Pasted code or SQL"] },
+      { name: "url", label: "Website link (live website only)", kind: "text", max: 300, value: "https://example.com", examples: [{ label: "Try an attack: private network", value: "https://localhost/admin" }, { label: "Try an attack: plain http", value: "http://example.com/" }] },
+      { name: "path", label: "File name (pasted code only)", kind: "text", max: 100, value: "supabase/migrations/001_clients.sql" }, { name: "text", label: "File content (pasted code only)", kind: "textarea", max: 20000, value: "create table public.clients (id int primary key, email text, notes text);\ngrant all on public.clients to anon;\ncreate policy \"open\" on public.clients for update using (true);" }],
+    async run(i, c) {
+      if (i.action === "Live website") {
+        try {
+          const r = await checkSite(i.url.trim(), c.deps); const w = { high: 0, medium: 1, low: 2 };
+          return { verdict: "allowed", headline: `Security ${r.security}/100, Readiness ${r.readiness}/100, verdict: ${r.verdict.toUpperCase()}`, rows: [...[...r.findings].sort((a, b) => w[a.severity] - w[b.severity]).slice(0, 25).map((x) => [`${x.area} [${x.severity}]`, x.message] as [string, string]), ["Checked", r.checked.join(", ")], ["How scored", "Each area starts at 100: high -25, medium -10, low -4. Read-only requests only."], ["Not covered", "Needs the site's code and database for the rest: login rules, row-level security, passwords, rate limits. Paste those into the other mode."]] };
+        } catch (e) {
+          if (e instanceof SafeFetchError) return fetchError(e);
+          const msg = (e as Error).message; console.error("launch-check:", msg.slice(0, 120));
+          return { verdict: "info", headline: "Could not check that site.", rows: [["Detail", msg.slice(0, 120)]] };
+        }
+      }
+      const p = /^[\w./@-]{1,100}$/.test(i.path) ? i.path : "pasted.sql"; const f = scanProject([{ path: p, text: i.text }]); const v = launchVerdict(f); return { verdict: v === "pass" ? "allowed" : "blocked", headline: `Verdict: ${v.toUpperCase()}`, rows: f.length ? f.slice(0, 30).map((x) => [`line ${x.line} [${x.severity}]`, `${x.rule}: ${x.message}`] as [string, string]) : [["Findings", "none"]] };
+    } },
 ];
 export const TRY_BY_ID = new Map(TRY.map((t) => [t.id, t]));
 export const realCtx = (githubToken?: string): Ctx => ({ deps: defaultDeps, fetchImpl: fetch, githubToken, cache: new Map() });

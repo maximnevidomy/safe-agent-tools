@@ -15,7 +15,7 @@ describe("tool surface", () => {
     for (const t of TOOLS) expect(banned.test(t.path), t.path).toBe(false);
   });
   it("only reaches market data and read-only account paths", () => {
-    for (const t of TOOLS) expect(t.path).toMatch(/^\/v5\/(market|position\/list|account\/wallet-balance|order\/realtime)/);
+    for (const t of TOOLS) expect(t.path).toMatch(/^\/v5\/(market\/|position\/(list|closed-pnl)$|account\/(wallet-balance|fee-rate|transaction-log)$|order\/realtime$|execution\/list$)/);
   });
   it("the list is frozen", () => {
     expect(Object.isFrozen(TOOLS)).toBe(true);

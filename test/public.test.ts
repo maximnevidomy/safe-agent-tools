@@ -80,8 +80,8 @@ describe("live tools", () => {
     for (const scenario of ["Publish with no approval", "Human approved, agent changes the text", "Agent forges its own token"]) expect((await run("approval-gate", { scenario })).verdict, scenario).toBe("blocked");
     expect((await run("approval-gate", { scenario: "Agent re-uses the same approval" })).rows[1]![1]).toMatch(/replayed/);
     expect((await run("approval-gate", { scenario: "Human approved, agent publishes the same text" })).rows[0]![1]).toBe("PUBLISHED");
-    expect((await run("launch-check", {})).headline).toMatch(/BLOCK/);
-    expect((await run("launch-check", { path: "../../etc/passwd\0" })).headline).toMatch(/BLOCK|REVIEW/); // odd names fall back, never touch disk
+    expect((await run("launch-check", { action: "Pasted code or SQL" })).headline).toMatch(/BLOCK/);
+    expect((await run("launch-check", { action: "Pasted code or SQL", path: "../../etc/passwd\0" })).headline).toMatch(/BLOCK|REVIEW/); // odd names fall back, never touch disk
   });
 });
 
