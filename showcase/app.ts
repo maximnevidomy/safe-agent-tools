@@ -32,6 +32,8 @@ export interface AppOptions {
   gateSecret?: string;
   netDeps?: Deps; // tests inject a fake network; production uses the real, IP-pinned transport
   bybitFetch?: typeof fetch;
+  publicHost?: string; // hostname of a tunnel (e.g. abc.trycloudflare.com): serves ONLY the read-only dashboard and the signed webhook
+  dashboardHtml?: () => Promise<string>;
 }
 const MAX_BODY = 100_000;
 
@@ -58,12 +60,22 @@ export function createApp(o: AppOptions) {
   };
   const tokenOk = (given: unknown) => { const a = Buffer.from(String(given ?? "")), b = Buffer.from(token); return a.length === b.length && timingSafeEqual(a, b); };
 
+  let dash: Promise<string> | null = null;
+  const dashboardOnce = () => (dash ??= o.dashboardHtml!());
+
   const server = http.createServer(async (req, res) => {
     try {
       const port = (server.address() as { port: number } | null)?.port ?? o.port;
       const host = String(req.headers.host ?? "");
-      if (!(host === `127.0.0.1:${port}` || host === `localhost:${port}`)) return send(res, 403, { error: "bad host" });
+      const local = host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+      const pub = !!o.publicHost && host.toLowerCase() === o.publicHost.toLowerCase();
+      if (!local && !pub) return send(res, 403, { error: "bad host" });
       const url = new URL(req.url ?? "/", "http://localhost");
+      if (pub && url.pathname !== "/webhook/instagram") { // public hostname: dashboard only, never the workbench
+        if (req.method !== "GET" || (url.pathname !== "/" && url.pathname !== "/dashboard") || !o.dashboardHtml) return send(res, 404, { error: "not found" });
+        return send(res, 200, await dashboardOnce(), "text/html");
+      }
+      if (req.method === "GET" && url.pathname === "/dashboard" && o.dashboardHtml) return send(res, 200, await dashboardOnce(), "text/html");
 
       // Instagram webhook: public endpoint, authenticated by Meta's signature, not by the UI token.
       if (url.pathname === "/webhook/instagram") {

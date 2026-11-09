@@ -41,6 +41,14 @@ The app protects itself: 127.0.0.1 only, Host-header check against DNS rebinding
 
 See [THREAT_MODEL.md](THREAT_MODEL.md) for what each module does and does not protect against.
 
+## Dashboard (per-tool before/after)
+
+`npm run site` writes `site/index.html`: one static page, no scripts, that shows for each of the ten tools the original project, its problem, a security score before and after, the attack table, and a live example produced at build time.
+
+**How the score is measured.** The same attack attempts (`showcase/attacks.ts`, 50 in total) run against a naive baseline we wrote for the idea and against our hardened module. Score = percentage of attacks stopped. The baseline is not the original project's code; facts about originals come from the tool-library review and repo metadata. 100% means "stopped everything in this suite", not "unbreakable". Tests assert the scores, so a regression fails CI.
+
+**Public HTTPS address.** `npm run demo` serves the dashboard at `http://127.0.0.1:4173/dashboard`. Point any HTTPS tunnel at port 4173 and start with `PUBLIC_HOST=<tunnel hostname>`: that hostname serves only the read-only dashboard (and the signature-checked Instagram webhook). The workbench, folder scanning and token endpoints stay reachable only through 127.0.0.1/localhost.
+
 ## Real-world run
 `launch-check` was run on the Christina Fitness codebase (796 files): verdict **pass**, 0 high, 0 medium, 29 informational notes
 (9 public-insert forms, 15 functions with `verify_jwt=false`, 3 public-only env files, 2 HTML sinks). The first run raised 11 high and

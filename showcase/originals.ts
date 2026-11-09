@@ -1,0 +1,66 @@
+// What each tool is based on, why that idea is risky, and what we changed.
+// "library" facts are quoted from Maxim's own tool library (ai-os, knowledge_items); we did not run or audit the originals' code.
+import type { ToolId } from "./attacks";
+
+export interface ToolInfo {
+  id: ToolId;
+  name: string;
+  idea: string; // one plain sentence
+  original: { name: string; url: string; also?: { name: string; url: string }; libraryTrust: number; libraryStatus: string; libraryNote: string };
+  problem: string;
+  changes: string[];
+  notCovered: string[];
+}
+
+export const TOOLS: ToolInfo[] = [
+  { id: "safe-fetch", name: "safe-fetch", idea: "Let an AI agent call any website or API.",
+    original: { name: "API Anything", url: "https://github.com/goodnight000/api-anything", libraryTrust: 60, libraryStatus: "passed the library's security gate", libraryNote: "No flags in the library review. The risk below comes from the kind of tool, not from a finding in this repo." },
+    problem: "A tool that fetches whatever URL the agent gives it can be tricked, by the agent or by text the agent read, into calling things on your own network: your laptop's admin pages, your cloud's secret-credentials address (169.254.169.254), internal services. This attack is called SSRF and it is one of the most common ways a fetch tool turns into a break-in.",
+    changes: ["Mandatory allowlist of hosts, https only", "Every address a name resolves to is checked; private and reserved ranges are refused", "The connection is pinned to the address that was checked (no DNS trick between check and connect)", "Every redirect is re-checked from scratch", "Size cap, time cap, per-caller rate limiter"],
+    notCovered: ["A malicious page on an allowed host can still return hostile text: treat results as untrusted data", "GET only; no proxy support"] },
+  { id: "llm-router", name: "llm-router", idea: "Send questions to many AI providers and fail over when one is down.",
+    original: { name: "FreeLLMAPI", url: "https://github.com/tashfeenahmed/freellmapi", also: { name: "OmniRoute", url: "https://github.com/diegosouzapw/OmniRoute" }, libraryTrust: 60, libraryStatus: "new (OmniRoute: trust 30)", libraryNote: "Library review: code and data go to free providers, some of which train on it. OmniRoute: routes code to 200+ unknown free providers, leak risk." },
+    problem: "A router that sends every prompt to whichever free provider answers also sends your private data there: client notes, emails, API keys pasted by accident. Free providers may store or train on it, and the router's own logs can become a second leak.",
+    changes: ["Each provider declares the most sensitive data it may receive; requests declare how sensitive they are", "Emails, phones, cards, tokens and keys are removed before anything leaves", "Logs hold only provider, timing and counts, never the text", "A circuit breaker stops hammering a dead provider"],
+    notCovered: ["Redaction is pattern-based and misses secrets hidden in ordinary sentences: tag truly secret data as secret", "Providers' own retention policies are outside our control"] },
+  { id: "bybit-readonly", name: "bybit-readonly", idea: "Give an AI agent access to exchange market data and positions.",
+    original: { name: "Bybit trading-mcp", url: "https://github.com/bybit-exchange/trading-mcp", libraryTrust: 55, libraryStatus: "rejected at the security gate", libraryNote: "Library review: exposes account-management tools including creating and deleting API keys and sub-accounts; last release more than 90 days ago." },
+    problem: "If an agent can call tools that trade, withdraw or manage keys, then one confused instruction or one malicious web page can move real money. Reading prices does not need any of those powers.",
+    changes: ["Only GET requests exist in the code; there is no write path to misuse", "A fixed list of read-only tools; order, withdraw and key tools do not exist", "Testnet by default; the real exchange needs an explicit double opt-in", "At start-up the key is inspected and refused if it has trade or transfer rights"],
+    notCovered: ["It cannot protect the exchange account itself: create the key read-only with an IP allowlist", "The key-permission check follows Bybit's documented response and should be confirmed once with a real testnet key"] },
+  { id: "safe-reach", name: "safe-reach", idea: "Let an agent read public sources: GitHub, feeds, social sites.",
+    original: { name: "Agent-Reach", url: "https://github.com/Panniantong/Agent-Reach", libraryTrust: 70, libraryStatus: "rejected at the security gate", libraryNote: "Library review: installed with curl; X, Reddit and Instagram work through account cookies, which risks bans and breaks terms of service." },
+    problem: "Reading the web through a logged-in browser session means the agent holds your cookies, and scraping that way breaks the sites' rules and can get the account banned. Passing raw API answers or links straight to the agent also hands it private fields and dangerous links.",
+    changes: ["Only legal channels: the official GitHub API and RSS", "Repo names are validated, so '../../user' cannot reach another endpoint", "Results are reduced to a whitelist of fields; only https links survive", "Everything goes through safe-fetch"],
+    notCovered: ["YouTube transcripts are not included yet; a legal channel still has to be chosen", "It cannot judge whether the content is true"] },
+  { id: "ig-webhook", name: "ig-webhook", idea: "Answer Instagram messages automatically.",
+    original: { name: "InstaMation", url: "https://github.com/explorearafat/InstaMation", libraryTrust: 35, libraryStatus: "new, very small project", libraryNote: "Library review: very young project (6 stars); needs checking that it uses the official API only." },
+    problem: "A webhook is a public door. Without checking the sender's signature anyone can send fake messages, replays can make the bot answer twice, a flood can make it spam, and a bot that ignores 'stop' or talks over a human gets the account reported and blocked.",
+    changes: ["Meta's HMAC signature is verified on the raw request bytes", "Replays are dropped", "Per-sender rate limit", "'Stop' is honoured and 'start' re-enables", "Silent while a human has taken over", "Message text is never stored"],
+    notCovered: ["This is the verification and decision core; the HTTP server, token storage and Meta's app review are the integrator's job", "Meta's 24-hour messaging window is not enforced here"] },
+  { id: "safe-exec", name: "safe-exec", idea: "Let an agent run command-line tools.",
+    original: { name: "CLI-Anything", url: "https://github.com/HKUDS/CLI-Anything", libraryTrust: 75, libraryStatus: "passed the library's security gate", libraryNote: "No flags in the library review. The risk below comes from the kind of tool, not from a finding in this repo." },
+    problem: "Running a command built from text the agent wrote is the classic injection hole: one stray '&&' or ';' and the agent's text becomes a second command. The child process also inherits every secret in your environment, and a runaway command can print forever or never stop.",
+    changes: ["Commands are chosen by name from an allowlist and mapped to absolute paths", "No shell, so special characters are just text", "Argument count, length and per-command rules", "The child gets a clean environment", "Hard timeout and output cap"],
+    notCovered: ["What an allowed program does with its arguments is still up to that program: add per-command rules and avoid allowing interpreters"] },
+  { id: "local-index", name: "local-index", idea: "Search your own code and notes so an agent has context.",
+    original: { name: "xerj", url: "https://github.com/xerj-org/xerj", libraryTrust: 45, libraryStatus: "rejected at the security gate", libraryNote: "Library review: installed with curl | sh from an unfamiliar domain, young repo with unusual star growth, optional reranking sends text to a third party." },
+    problem: "An index that reads everything under a folder will also index your .env file, private keys, and anything a symlink points to outside the folder. Search results then hand those secrets to the agent, and a path like ../ can read files far outside the project.",
+    changes: ["Never indexes .env, keys, credentials, symlinks, dependency folders or binary files", "File reads are confined to the folder", "Personal data is redacted in snippets", "No network at all, nothing to install with a script"],
+    notCovered: ["A secret pasted inside an ordinary text file is still indexed: keep the folder small and review it"] },
+  { id: "skill-scanner", name: "skill-scanner", idea: "Check an agent skill or plugin before installing it.",
+    original: { name: "clawscan", url: "https://github.com/openclaw/clawscan", also: { name: "vibe-shield", url: "https://github.com/avivgerz-hue/vibe-shield" }, libraryTrust: 55, libraryStatus: "passed (vibe-shield: trust 40)", libraryNote: "Library review: both are young projects (about 150 stars or fewer). This tool is our own scanner for the same job, not a repair of a weak repo." },
+    problem: "A skill is instructions plus scripts that your agent obeys. A poisoned one can pipe a download into a shell, hide orders in invisible characters, tell the agent to keep secrets from you, read your SSH keys or send files to a webhook.",
+    changes: ["Static rules that flag pipe-to-shell, encoded payloads, destructive deletes, credential reads, known exfiltration endpoints, prompt-injection phrases and hidden Unicode", "Verdict block, review or pass, with line numbers", "Benign skills pass: 0 false alarms on the sample set"],
+    notCovered: ["A determined attacker can obfuscate past static rules: 'pass' means no known bad pattern, not 'safe'"] },
+  { id: "approval-gate", name: "approval-gate", idea: "An agent may post, send or publish, but only with a human's yes.",
+    original: { name: "37studio", url: "https://github.com/Shaitrish/37studio", libraryTrust: 50, libraryStatus: "passed the library's security gate", libraryNote: "No flags in the library review. It auto-publishes to 9 platforms with your own keys; the risk below comes from the kind of tool." },
+    problem: "A simple 'approved: true' flag is not enough. The text can be changed after approval, one approval can be reused, an old approval can be used days later, and an unsigned token can be written by the agent itself.",
+    changes: ["Approval is a signed token bound to a hash of the exact payload", "Single use", "Expires after minutes", "Signed with a secret the agent does not hold"],
+    notCovered: ["A human who approves without reading defeats it", "Its store is in memory: use a database for production"] },
+  { id: "launch-check", name: "launch-check", idea: "A check to run before launching an app built with Supabase or Lovable.",
+    original: { name: "check-pre-lancamento", url: "https://github.com/dantaspaulo/check-pre-lancamento", libraryTrust: 30, libraryStatus: "rejected at the security gate", libraryNote: "Library review: no license (NOASSERTION), so it cannot be reused." },
+    problem: "AI-built apps often ship with tables anyone can read or change, anonymous write access, policies that say 'true', functions that run with elevated rights, or a master key pasted in the code. A checklist that only greps for leaked keys misses most of this.",
+    changes: ["Reads your migrations, config and source", "Flags tables without row level security, anonymous write grants, open policies, privileged functions without a fixed search_path, service-role keys and committed env files", "Understands later fixes (an ALTER FUNCTION that repairs an earlier definition)", "Ranks findings and gives a release verdict"],
+    notCovered: ["It reads the migration history, not the live database: run it next to a live advisor check"] },
+];
