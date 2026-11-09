@@ -56,15 +56,17 @@ export async function githubReadme(owner: string, repo: string, opts: { token?: 
   return r.body.toString("utf8");
 }
 
-// Turn the signals we care about (license, activity, archive state, README content) into one verdict.
+// Turn the signals we care about (license, activity, archive state, README content) into one verdict and a 0-100 score.
+// Score starts at 100 and loses points per signal, so every point is explained. A "bad" signal always means reject.
 export function vetRepo(meta: { stars: number; license: string | null; pushed_at: string; archived: boolean }, readmeFindings: Array<{ severity: string; rule: string }>, now = Date.now()) {
-  const signals: Array<{ level: "bad" | "warn" | "ok"; text: string }> = [];
+  const signals: Array<{ level: "bad" | "warn" | "ok"; text: string; points: number }> = [];
   const days = Math.floor((now - Date.parse(meta.pushed_at)) / 86_400_000);
-  if (meta.archived) signals.push({ level: "bad", text: "repository is archived" });
-  if (!meta.license || meta.license === "NOASSERTION") signals.push({ level: "bad", text: "no clear license" }); else signals.push({ level: "ok", text: `license ${meta.license}` });
-  if (Number.isFinite(days)) signals.push({ level: days > 180 ? "bad" : days > 90 ? "warn" : "ok", text: `last push ${days} days ago` });
-  if (meta.stars < 20) signals.push({ level: "warn", text: `only ${meta.stars} stars (young or unproven)` });
-  for (const f of readmeFindings.filter((x) => x.severity === "high")) signals.push({ level: "bad", text: `README risk: ${f.rule}` });
-  const verdict = signals.some((s) => s.level === "bad") ? "reject" : signals.some((s) => s.level === "warn") ? "review" : "ok";
-  return { verdict, signals };
+  if (meta.archived) signals.push({ level: "bad", text: "repository is archived", points: -40 });
+  if (!meta.license || meta.license === "NOASSERTION") signals.push({ level: "bad", text: "no clear license", points: -25 }); else signals.push({ level: "ok", text: `license ${meta.license}`, points: 0 });
+  if (Number.isFinite(days)) signals.push({ level: days > 180 ? "bad" : days > 90 ? "warn" : "ok", text: `last push ${days} days ago`, points: days > 180 ? -25 : days > 90 ? -10 : 0 });
+  if (meta.stars < 20) signals.push({ level: "warn", text: `only ${meta.stars} stars (young or unproven)`, points: -10 });
+  for (const f of readmeFindings.filter((x) => x.severity === "high")) signals.push({ level: "bad", text: `README risk: ${f.rule}`, points: -30 });
+  const score = Math.max(0, 100 + signals.reduce((a, x) => a + x.points, 0));
+  const verdict = signals.some((x) => x.level === "bad") ? "reject" : signals.some((x) => x.level === "warn") ? "review" : "ok";
+  return { verdict, score, signals };
 }

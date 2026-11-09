@@ -107,7 +107,7 @@ export const TRY: TryDef[] = [
       try {
         const meta = await githubRepo(m[1]!, m[2]!, { token: c.githubToken }, c.deps); const readme = await githubReadme(m[1]!, m[2]!, { token: c.githubToken }, c.deps);
         const v = vetRepo(meta, scanText("README", readme).findings);
-        const out: TryOut = { verdict: "allowed", headline: `Verdict: ${v.verdict.toUpperCase()}`, rows: [["Repo", meta.full_name], ...v.signals.map((s) => [s.level.toUpperCase(), s.text] as [string, string])] };
+        const out: TryOut = { verdict: "allowed", headline: `Score ${v.score}/100, verdict: ${v.verdict.toUpperCase()}`, rows: [["Repo", meta.full_name], ...v.signals.map((s) => [s.level.toUpperCase(), s.points ? `${s.text} (${s.points})` : s.text] as [string, string]), ["How scored", "Starts at 100; each risk signal removes points, shown in brackets."]] };
         c.cache.set(key, { at: Date.now(), v: out }); if (c.cache.size > 200) c.cache.delete(c.cache.keys().next().value!); return out;
       } catch (e) {
         const msg = (e as Error).message; console.error("safe-reach:", msg.slice(0, 120));
