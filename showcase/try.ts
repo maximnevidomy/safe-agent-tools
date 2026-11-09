@@ -13,7 +13,8 @@ import { LocalIndex } from "../src/local-index";
 import { extractPrice } from "../src/price-extract";
 import { safeExec, ExecError } from "../src/safe-exec";
 import { Deps, SafeFetchError, defaultDeps, safeFetch } from "../src/safe-fetch";
-import { auditRepo } from "../src/safe-reach";
+import { CHANNELS, auditRepo, readChannel, type Channel } from "../src/safe-reach";
+import { readPage } from "../src/read-page";
 import { scanText } from "../src/skill-scanner";
 import type { ToolId } from "./attacks";
 
@@ -98,9 +99,33 @@ export const TRY: TryDef[] = [
       }
     } },
 
-  { id: "safe-reach", network: true, button: "Audit this repo", intro: "Enter a public GitHub repo. The tool reads it through the official API only, scans the README plus the install scripts, workflows and source files for dangerous patterns, and returns a safety score.",
-    fields: [{ name: "repo", label: "owner/name", kind: "text", max: 120, value: "goodnight000/api-anything", examples: [{ label: "Try an attack: path trick", value: "../../user" }] }],
+  { id: "safe-reach", network: true, button: "Run", intro: "Read public sources without cookies or logins. Pick what to do, then enter the target: audit a GitHub repo (README and code safety score), read any public web page as clean text, or read a public feed (YouTube channel, GitHub releases, Hacker News, Reddit).",
+    fields: [{ name: "action", label: "What to do", kind: "select", max: 30, value: "Audit a GitHub repo", options: ["Audit a GitHub repo", "Read a web page", "YouTube channel videos", "GitHub releases", "Hacker News front page", "Reddit subreddit"] },
+      { name: "repo", label: "Target: owner/name, page link, YouTube channel id (UC...), or subreddit", kind: "text", max: 400, value: "goodnight000/api-anything", examples: [{ label: "Try an attack: path trick", value: "../../user" }, { label: "Try an attack: private network page", value: "https://localhost/admin" }, { label: "Try an attack: cloud secrets address", value: "https://169.254.169.254/latest/meta-data/" }] }],
     async run(i, c) {
+      const act = i.action; const target = i.repo.trim();
+      if (act === "Read a web page") {
+        try {
+          const p = await readPage(target, c.deps);
+          return { verdict: "allowed", headline: `Read ${p.chars} characters${p.truncated ? " (showing the first 6000)" : ""}`, rows: [["Title", p.title || "(none)"], ["Text", p.text.slice(0, 1500)], ...p.links.slice(0, 8).map((l) => ["Link", `${l.text} -> ${l.url}`] as [string, string]), ["Safety", "https only, public addresses only, size capped, scripts and markup removed, only https links kept."]] };
+        } catch (e) {
+          const msg = (e as Error).message; console.error("safe-reach page:", msg.slice(0, 120));
+          if (e instanceof SafeFetchError) return fetchError(e);
+          return { verdict: "info", headline: "Could not read that page.", rows: [["Detail", msg.slice(0, 160)]] };
+        }
+      }
+      const kind: Channel | undefined = act === "YouTube channel videos" ? "youtube" : act === "GitHub releases" ? "github-releases" : act === "Hacker News front page" ? "hackernews" : act === "Reddit subreddit" ? "reddit" : undefined;
+      if (kind && (CHANNELS as readonly string[]).includes(kind)) {
+        try {
+          const items = (await readChannel(kind, target, c.deps)).slice(0, 10);
+          if (!items.length) return { verdict: "info", headline: "The feed is empty.", rows: [] };
+          return { verdict: "allowed", headline: `${items.length} latest items`, rows: items.map((x) => [x.date.slice(0, 16) || "item", `${x.title}${x.link ? ` -> ${x.link}` : ""}`] as [string, string]) };
+        } catch (e) {
+          const msg = (e as Error).message; console.error("safe-reach feed:", msg.slice(0, 120));
+          if (/invalid/.test(msg)) return blocked(`Refused: ${msg}.`);
+          return { verdict: "info", headline: /HTTP 40[34]|HTTP 429/.test(msg) ? "That source refused the request (it may block cloud servers or the name is wrong)." : "The source did not answer.", rows: [["Detail", msg.slice(0, 120)]] };
+        }
+      }
       const m = /^([^/\s]+)\/([^/\s]+)$/.exec(i.repo.trim());
       if (!m) return blocked("Refused: that is not an owner/name pair.");
       const key = `repo:${i.repo.trim().toLowerCase()}`; const hit = c.cache.get(key); if (hit && Date.now() - hit.at < 600_000) return hit.v;

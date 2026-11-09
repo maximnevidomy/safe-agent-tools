@@ -114,3 +114,18 @@ export async function auditRepo(owner: string, repo: string, opts: { token?: str
   const verdict = signals.some((x) => x.level === "bad") ? "reject" : signals.some((x) => x.level === "warn") ? "review" : "ok";
   return { full_name: meta.full_name, score, verdict, signals, findings, secretFiles, coverage: { scanned: files.length, candidates, skippedLarge, bytes, treeTruncated: Boolean(tj.truncated) } };
 }
+
+// Public feed channels with fixed hosts. The id is validated per kind, so it cannot steer the request elsewhere.
+export const CHANNELS = ["youtube", "github-releases", "hackernews", "reddit"] as const;
+export type Channel = (typeof CHANNELS)[number];
+export function channelUrl(kind: Channel, id: string): { url: string; host: string } {
+  const bad = () => new Error(`invalid ${kind} id`);
+  if (kind === "youtube") { if (!/^UC[A-Za-z0-9_-]{22}$/.test(id)) throw bad(); return { url: `https://www.youtube.com/feeds/videos.xml?channel_id=${id}`, host: "www.youtube.com" }; }
+  if (kind === "github-releases") { const m = /^([^/]+)\/([^/]+)$/.exec(id); if (!m || !OWNER.test(m[1]!) || !REPO.test(m[2]!) || m[2] === "." || m[2] === "..") throw bad(); return { url: `https://github.com/${m[1]}/${m[2]}/releases.atom`, host: "github.com" }; }
+  if (kind === "reddit") { if (!/^[A-Za-z0-9_]{2,21}$/.test(id)) throw bad(); return { url: `https://www.reddit.com/r/${id}/.rss`, host: "www.reddit.com" }; }
+  return { url: "https://news.ycombinator.com/rss", host: "news.ycombinator.com" };
+}
+export async function readChannel(kind: Channel, id: string, deps: Deps = defaultDeps): Promise<FeedItem[]> {
+  const c = channelUrl(kind, id);
+  return readFeed(c.url, [c.host], deps);
+}

@@ -48,6 +48,12 @@ describe("live tools", () => {
     for (const action of ["create_order", "withdraw", "create_api_key"]) expect((await run("bybit-readonly", { action })).verdict).toBe("blocked");
     expect((await run("bybit-readonly", { symbol: "BTC/USDT; drop" })).headline).toMatch(/symbol/);
   });
+  it("safe-reach reads pages and feeds, and refuses private targets", async () => {
+    const pg = await run("safe-reach", { action: "Read a web page", repo: "https://shop.example/" }); expect(pg.verdict).toBe("allowed");
+    expect((await run("safe-reach", { action: "Read a web page", repo: "https://localhost/admin" })).verdict).toBe("blocked");
+    expect((await run("safe-reach", { action: "Read a web page", repo: "https://169.254.169.254/latest/meta-data/" })).verdict).toBe("blocked");
+    expect((await run("safe-reach", { action: "Reddit subreddit", repo: "../x" })).verdict).toBe("blocked");
+  });
   it("safe-reach vets a repo and refuses path tricks", async () => {
     const r = await run("safe-reach", {}); expect(r.headline).toMatch(/REJECT/); expect(r.rows.map((x) => x.join(" ")).join("\n")).toMatch(/SECRET FILE.*\.env[\s\S]*install-hook-remote/);
     expect((await run("safe-reach", { repo: "../../user" })).verdict).toBe("blocked");
