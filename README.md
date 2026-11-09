@@ -1,5 +1,7 @@
 # safe-agent-tools
 
+**Live demo (try every tool in your browser): https://safe-agent-tools.onrender.com**
+
 Hardened rebuilds of ten popular "agent tool" ideas that are useful but weak on security, plus one showcase
 project that chains all ten in a single agent run and proves each works and each attack is stopped.
 TypeScript, zero runtime dependencies, 146 tests, `npm audit` clean.
