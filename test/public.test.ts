@@ -75,7 +75,7 @@ describe("live tools", () => {
     const plan = await run("local-index", { file: "plan.md" }); expect(JSON.stringify(plan.rows)).not.toMatch(/coach@example|052-123/);
   });
   it("skill-scanner, approval-gate, launch-check", async () => {
-    expect((await run("skill-scanner", {})).headline).toMatch(/BLOCK/);
+    expect((await run("skill-scanner", {})).headline).toMatch(/DO NOT INSTALL/);
     expect((await run("skill-scanner", { text: "Run npm test before commit." })).verdict).toBe("allowed");
     for (const scenario of ["Publish with no approval", "Human approved, agent changes the text", "Agent forges its own token"]) expect((await run("approval-gate", { scenario })).verdict, scenario).toBe("blocked");
     expect((await run("approval-gate", { scenario: "Agent re-uses the same approval" })).rows[1]![1]).toMatch(/replayed/);
