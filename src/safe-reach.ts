@@ -1,6 +1,8 @@
 // safe-reach: read-only access to public sources through LEGAL channels only (official GitHub API, RSS/Atom).
 // No browser cookies, no account sessions, no shell installers. Everything goes through safe-fetch.
+import { LIMITS, auditFiles, codePoints, pickFiles, secretFilePaths, type AuditFinding, type TreeEntry } from "./repo-audit";
 import { Deps, defaultDeps, safeFetch } from "./safe-fetch";
+import { scanText } from "./skill-scanner";
 
 const OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const REPO = /^[A-Za-z0-9._-]{1,100}$/;
@@ -69,4 +71,46 @@ export function vetRepo(meta: { stars: number; license: string | null; pushed_at
   const score = Math.max(0, 100 + signals.reduce((a, x) => a + x.points, 0));
   const verdict = signals.some((x) => x.level === "bad") ? "reject" : signals.some((x) => x.level === "warn") ? "review" : "ok";
   return { verdict, score, signals };
+}
+
+export interface RepoAudit {
+  full_name: string; score: number; verdict: "ok" | "review" | "reject";
+  signals: Array<{ level: "bad" | "warn" | "ok"; text: string; points: number }>;
+  findings: AuditFinding[]; secretFiles: string[];
+  coverage: { scanned: number; candidates: number; skippedLarge: number; bytes: number; treeTruncated: boolean };
+}
+
+// Real review of a public repo: health signals + README + a static scan of the files that matter most.
+// Network: api.github.com (metadata, tree, README) and raw.githubusercontent.com (file contents). Nothing is cloned or run.
+export async function auditRepo(owner: string, repo: string, opts: { token?: string } = {}, deps: Deps = defaultDeps): Promise<RepoAudit> {
+  const meta = await githubRepo(owner, repo, opts, deps);
+  const readme = await githubReadme(owner, repo, opts, deps);
+  const health = vetRepo(meta, scanText("README", readme).findings);
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json", "User-Agent": "safe-agent-tools" };
+  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  const t = await safeFetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(meta.default_branch)}?recursive=1`, { allowHosts: ["api.github.com"], maxBytes: 3_000_000, headers }, deps);
+  if (t.status !== 200) throw new Error(`GitHub HTTP ${t.status}`);
+  const tj = JSON.parse(t.body.toString("utf8")) as { tree?: TreeEntry[]; truncated?: boolean };
+  const tree = (tj.tree ?? []).filter((x) => x && typeof x.path === "string" && !x.path.includes("..") && !x.path.startsWith("/"));
+  const { picked, candidates, skippedLarge } = pickFiles(tree);
+  const files: Array<{ path: string; text: string }> = []; let bytes = 0;
+  const queue = [...picked];
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    for (let p = queue.shift(); p !== undefined; p = queue.shift()) {
+      try {
+        const url = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(meta.default_branch)}/${p.split("/").map(encodeURIComponent).join("/")}`;
+        const r = await safeFetch(url, { allowHosts: ["raw.githubusercontent.com"], maxBytes: LIMITS.maxFileBytes + 1, timeoutMs: 6000 }, deps);
+        if (r.status === 200 && !r.body.includes(0)) { files.push({ path: p, text: r.body.toString("utf8") }); bytes += r.body.length; }
+      } catch { /* one unreadable file does not stop the audit */ }
+    }
+  }));
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  const findings = auditFiles(files); const secretFiles = secretFilePaths(tree);
+  const pts = codePoints(findings, secretFiles);
+  const signals = [...health.signals];
+  if (pts) signals.push({ level: findings.some((f) => f.severity === "high") || secretFiles.length ? "bad" : "warn", text: `code scan: ${findings.length} finding(s), ${secretFiles.length} committed secret file(s)`, points: pts });
+  else signals.push({ level: "ok", text: `code scan: no known bad pattern in ${files.length} files`, points: 0 });
+  const score = Math.max(0, health.score + pts);
+  const verdict = signals.some((x) => x.level === "bad") ? "reject" : signals.some((x) => x.level === "warn") ? "review" : "ok";
+  return { full_name: meta.full_name, score, verdict, signals, findings, secretFiles, coverage: { scanned: files.length, candidates, skippedLarge, bytes, treeTruncated: Boolean(tj.truncated) } };
 }

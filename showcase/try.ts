@@ -13,7 +13,7 @@ import { LocalIndex } from "../src/local-index";
 import { extractPrice } from "../src/price-extract";
 import { safeExec, ExecError } from "../src/safe-exec";
 import { Deps, SafeFetchError, defaultDeps, safeFetch } from "../src/safe-fetch";
-import { githubReadme, githubRepo, vetRepo } from "../src/safe-reach";
+import { auditRepo } from "../src/safe-reach";
 import { scanText } from "../src/skill-scanner";
 import type { ToolId } from "./attacks";
 
@@ -98,16 +98,17 @@ export const TRY: TryDef[] = [
       }
     } },
 
-  { id: "safe-reach", network: true, button: "Vet this repo", intro: "Enter a public GitHub repo. The tool reads it through the official API only, scans its README for dangerous instructions, and returns a verdict.",
+  { id: "safe-reach", network: true, button: "Audit this repo", intro: "Enter a public GitHub repo. The tool reads it through the official API only, scans the README plus the install scripts, workflows and source files for dangerous patterns, and returns a safety score.",
     fields: [{ name: "repo", label: "owner/name", kind: "text", max: 120, value: "goodnight000/api-anything", examples: [{ label: "Try an attack: path trick", value: "../../user" }] }],
     async run(i, c) {
       const m = /^([^/\s]+)\/([^/\s]+)$/.exec(i.repo.trim());
       if (!m) return blocked("Refused: that is not an owner/name pair.");
       const key = `repo:${i.repo.trim().toLowerCase()}`; const hit = c.cache.get(key); if (hit && Date.now() - hit.at < 600_000) return hit.v;
       try {
-        const meta = await githubRepo(m[1]!, m[2]!, { token: c.githubToken }, c.deps); const readme = await githubReadme(m[1]!, m[2]!, { token: c.githubToken }, c.deps);
-        const v = vetRepo(meta, scanText("README", readme).findings);
-        const out: TryOut = { verdict: "allowed", headline: `Repo health score ${v.score}/100, verdict: ${v.verdict.toUpperCase()}`, rows: [["Repo", meta.full_name], ...v.signals.map((s) => [s.level.toUpperCase(), s.points ? `${s.text} (${s.points})` : s.text] as [string, string]), ["How scored", "Starts at 100; each risk signal removes points, shown in brackets."], ["Not covered", "This checks license, activity and the README. It does not read or audit the code itself."]] };
+        const a = await auditRepo(m[1]!, m[2]!, { token: c.githubToken }, c.deps);
+        const cv = a.coverage;
+        const top = a.findings.filter((f) => f.severity !== "low").slice(0, 8).map((f) => [`${f.severity.toUpperCase()} ${f.rule}`, `${f.file}:${f.line} ${f.why}. ${f.excerpt}`] as [string, string]);
+        const out: TryOut = { verdict: "allowed", headline: `Safety score ${a.score}/100, verdict: ${a.verdict.toUpperCase()}`, rows: [["Repo", a.full_name], ...a.signals.map((s) => [s.level.toUpperCase(), s.points ? `${s.text} (${s.points})` : s.text] as [string, string]), ...a.secretFiles.slice(0, 5).map((f) => ["SECRET FILE", `${f} is committed to the repo`] as [string, string]), ...top, ["Coverage", `Read ${cv.scanned} of ${cv.candidates} code files (${Math.round(cv.bytes / 1024)} KB)${cv.skippedLarge ? `, ${cv.skippedLarge} skipped as too large` : ""}${cv.treeTruncated ? ", repo listing was truncated by GitHub" : ""}. Install scripts, workflows and shell files are read first.`], ["How scored", "Starts at 100. Health signals (license, activity, stars, README) and code findings remove points, shown in brackets."], ["Not covered", "This is a static pattern scan. It does not run the code, check dependency vulnerabilities or prove the repo is safe. A clean score means no known bad pattern was found."]] };
         c.cache.set(key, { at: Date.now(), v: out }); if (c.cache.size > 200) c.cache.delete(c.cache.keys().next().value!); return out;
       } catch (e) {
         const msg = (e as Error).message; console.error("safe-reach:", msg.slice(0, 120));

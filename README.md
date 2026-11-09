@@ -31,7 +31,7 @@ The app protects itself: 127.0.0.1 only, Host-header check against DNS rebinding
 | `safe-fetch` | API Anything (call any URL/API from an agent) | SSRF: host allowlist, https only, private/reserved IP block on every resolved record, connection pinned to the checked IP, redirects re-validated, size/time caps, rate limiter |
 | `llm-router` | FreeLLMAPI / OmniRoute (multi-provider failover) | Data leakage: per-provider sensitivity ceiling, PII/secret redaction, metadata-only logs, circuit breaker |
 | `bybit-readonly` | Bybit trading-mcp | Account takeover: GET-only allowlist, no key/sub-account/transfer/order tools, testnet default, refuses keys with trade/withdraw rights |
-| `safe-reach` | Agent-Reach | ToS and account risk: official GitHub API and RSS only, no cookies, output reduced to whitelisted fields |
+| `safe-reach` | Agent-Reach | ToS and account risk: official GitHub API and RSS only, no cookies, output reduced to whitelisted fields; `auditRepo` gives a real safety score from health signals, the README and a static scan of install scripts, workflows and source (not a proof of safety) |
 | `ig-webhook` | InstaMation | Spoofed/replayed events and spam: HMAC signature on raw body, constant-time token check, replay drop, per-sender rate limit, opt-out, human handover, no message text stored |
 | `safe-exec` | CLI-Anything (give agents any CLI) | Command injection: allowlist by name, no shell, argument checks, scrubbed environment, timeout and output cap |
 | `local-index` | xerj (local code/doc search for agents) | Secret and path leaks: never indexes `.env`/keys/symlinks, confined to root, redacted snippets, no network, no `curl\|sh` install |
