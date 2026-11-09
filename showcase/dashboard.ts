@@ -42,11 +42,14 @@ export async function buildDashboard(meta: DashboardMeta = gitMeta(), fragment =
   const totalAttacks = ids.reduce((a, i) => a + scores[i].applicable, 0);
   const falseAlarms = benignFalseAlarms();
 
-  const sections = TOOLS.map((t, n) => {
+  const FEATURED: ToolId[] = ["safe-fetch", "launch-check", "safe-reach"];
+  const secs = TOOLS.map((t, n) => {
     const s = scores[t.id], e = ex[t.id];
     const rows = s.items.map((i) => `<tr><td>${esc(i.title)}</td><td>${cell(i.naive)}</td><td>${cell(i.safe)}</td></tr>`).join("");
     const also = t.original.also ? ` · also <a href="${esc(t.original.also.url)}" rel="noopener noreferrer">${esc(t.original.also.name)}</a>` : "";
-    return `<section id="${t.id}">
+    const featured = FEATURED.includes(t.id);
+    const wrap = (inner: string) => featured ? `<section id="${t.id}">${inner}</section>` : `<details class="tool" id="${t.id}"><summary><b>${esc(t.name)}</b> <span class="muted">${esc(t.idea)}</span> <b class="${tone(s.safeScore)}">${s.safeScore}%</b></summary><section>${inner}</section></details>`;
+    return { featured, html: wrap(`
 <h2><span class="n">${n + 1}</span>${esc(t.name)} <small>${esc(t.idea)}</small></h2>
 <div class="scores">${bar("Before: simple version (our baseline, not the original)", s.naiveScore)}${bar("After (" + esc(t.name) + ")", s.safeScore)}<p class="muted">${s.applicable} attack attempts. Score = share of attacks stopped.</p></div>
 <div class="grid">
@@ -60,10 +63,12 @@ ${live ? tryForm(t.id) : ""}
 <h3>${live ? "Recorded example" : "It works: live example"}</h3><div class="ex"><div><b>Input</b><pre>${esc(e.input)}</pre></div><div><b>Result (recorded when this page was built)</b><pre>${esc(e.output)}</pre></div></div>
 ${e.simulated ? `<p class="muted">Simulated in this example: ${esc(e.simulated)}.</p>` : `<p class="muted">Nothing simulated: the real module ran on this machine.</p>`}
 <h3>Still not covered</h3><ul class="muted">${t.notCovered.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
-</section>`;
-  }).join("\n");
+`) };
+  });
+  const sections = secs.filter((x) => x.featured).map((x) => x.html).join("\n")
+    + `\n<h2 class="more">${secs.filter((x) => !x.featured).length} more tools <small>Same format: original, problem, scores, live form. Open any one.</small></h2>\n` + secs.filter((x) => !x.featured).map((x) => x.html).join("\n");
 
-  const nav = TOOLS.map((t) => `<a href="#${t.id}">${esc(t.name)} <b class="${tone(scores[t.id].safeScore)}">${scores[t.id].safeScore}</b></a>`).join("");
+  const nav = TOOLS.filter((t) => FEATURED.includes(t.id)).map((t) => `<a href="#${t.id}">${esc(t.name)} <b class="${tone(scores[t.id].safeScore)}">${scores[t.id].safeScore}</b></a>`).join("");
   const head = fragment ? "" : `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`;
   const open = fragment ? "" : `</head><body>`, close = fragment ? "" : `</body></html>`;
   return `${head}<title>Safe Agent Tools</title><meta name="claude:viewport-fit-sides" content="cover">
@@ -87,11 +92,12 @@ form.try{display:grid;gap:12px}.fld{display:grid;gap:4px}label{font-size:.85rem;
 button[type=submit]{justify-self:start;font:inherit;font-weight:600;background:var(--acc);color:var(--bg);border:0;border-radius:8px;padding:9px 18px;cursor:pointer}button:disabled{opacity:.6;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .exs{display:flex;flex-wrap:wrap;gap:6px}.ghost{font:inherit;font-size:.8rem;background:transparent;color:var(--acc);border:1px dashed var(--line);border-radius:999px;padding:3px 10px;cursor:pointer}
 .res{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:4px}.res.blocked{border-color:var(--good)}.res.allowed{border-color:var(--acc)}.res dl{display:grid;grid-template-columns:minmax(90px,max-content) 1fr;gap:4px 12px;margin:.6em 0 0}.res dt{color:var(--mut);font-size:.85rem}.res dd{margin:0;white-space:pre-wrap;word-break:break-word}.pic{display:block;max-width:180px;max-height:180px;border-radius:8px;margin-top:8px}
-.note{border-left:4px solid var(--mid);background:var(--card);padding:12px 16px;border-radius:0 10px 10px 0;margin:16px 0}li{margin:.2em 0}
+details.tool{background:var(--card);border:1px solid var(--line);border-radius:14px;margin:10px 0}details.tool>summary{cursor:pointer;padding:14px 18px;list-style:none}details.tool>summary::-webkit-details-marker{display:none}details.tool>summary::before{content:"+ ";color:var(--acc);font-weight:700}details.tool[open]>summary::before{content:"- "}details.tool>section{border:0;margin:0;padding-top:0}h2.more{margin-top:34px}.real{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin:16px 0}.real div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}.note{border-left:4px solid var(--mid);background:var(--card);padding:12px 16px;border-radius:0 10px 10px 0;margin:16px 0}li{margin:.2em 0}
 @media (max-width:560px){.bar{grid-template-columns:1fr 1fr 48px}.bar .bl{grid-column:1/-1}}
 </style>${open}<main>
 <h1>safe-agent-tools</h1>
-<p>Ten open-source agent-tool ideas, rebuilt with security first. Each section shows the original, its problem, a security score before and after, and a live example.</p>
+<p><b>I took risky open-source AI-agent tools, rebuilt them with security first, and measured the result.</b> Three are shown in full below; seven more are one click away. Each one shows the original, its problem, a security score before and after, and a live example you can try.</p>
+<div class="real"><div><b>Christina Fitness</b><br><span class="muted">Women's fitness and nutrition platform I build and run: React, Vite, Supabase, Paddle payments, edge functions.</span></div><div><b>Bath Plus website and competitor price monitor</b><br><span class="muted">I maintain the store's website (products, images, prices, orders) and am building a system that tracks competitor prices.</span></div></div>
 <div class="hero"><div class="stat"><b class="low">${avg("naiveScore")}%</b>average score, naive baseline</div><div class="stat"><b class="good">${avg("safeScore")}%</b>average score, our tools</div><div class="stat"><b>${totalAttacks}</b>attack attempts run</div><div class="stat"><b>${falseAlarms}</b>false alarms on ${BENIGN_SKILLS.length} harmless skills</div></div>
 <div class="note"><b>How to read the scores.</b> Every attack is run for real against two versions of the same idea: a deliberately simple "naive" version that we wrote, and our hardened tool. The score is the percentage of attacks stopped. The naive version is <b>not</b> the original project's code: we did not run or audit the originals. What we say about the originals comes from the tool library review and public repo metadata. 100% means "stopped every attack in this suite", not "unbreakable"; each section lists what is still not covered.</div>
 ${live ? `<div class="note"><b>Try everything yourself.</b> Each tool has a live form. Your input is not stored, nothing runs on your computer, and results are shown as plain text. The server holds no secrets and limits how often each visitor can try.</div>` : ""}
