@@ -24,7 +24,7 @@ details.tool{background:var(--card);border:1px solid var(--line);border-radius:1
 </style></head><body><main>
 <h1>safe-agent-tools</h1>
 <p><b>I took risky open-source AI-agent tools, rebuilt them with security first, and measured the result.</b> Three are shown in full below; seven more are one click away. Each one shows the original, its problem, a security score before and after, and a live example you can try.</p>
-<div class="real"><div><b>Christina Fitness</b><br><span class="muted">Women's fitness and nutrition platform I build and run: React, Vite, Supabase, Paddle payments, edge functions.</span></div><div><b>Bath Plus website and competitor price monitor</b><br><span class="muted">I maintain the store's website (products, images, prices, orders) and am building a system that tracks competitor prices.</span></div></div>
+<div class="real"><div><b>Christina Fitness</b><br><span class="muted">Women's fitness and nutrition platform I build and run: React, Vite, Supabase, Paddle payments, edge functions.</span></div><div><b>Bath Plus website</b><br><span class="muted">I maintain the store's website since 2023: products, images, prices and orders.</span></div></div>
 <div class="hero"><div class="stat"><b class="low">4%</b>average score, naive baseline</div><div class="stat"><b class="good">100%</b>average score, our tools</div><div class="stat"><b>50</b>attack attempts run</div><div class="stat"><b>0</b>false alarms on 3 harmless skills</div></div>
 <div class="note"><b>How to read the scores.</b> Every attack is run for real against two versions of the same idea: a deliberately simple "naive" version that we wrote, and our hardened tool. The score is the percentage of attacks stopped. The naive version is <b>not</b> the original project's code: we did not run or audit the originals. What we say about the originals comes from the tool library review and public repo metadata. 100% means "stopped every attack in this suite", not "unbreakable"; each section lists what is still not covered.</div>
 
@@ -220,5 +220,5 @@ line 2 [high] prompt-injection: tries to override the agent&#39;s instructions o
 <p class="muted">Nothing simulated: the real module ran on this machine.</p>
 <h3>Still not covered</h3><ul class="muted"><li>No publishing to the 9 platforms, video editor or Autopilot: this is the safety gate you put in front of those, not a replacement</li><li>A human who approves without reading defeats it</li><li>Its store is in memory: use a database for production</li></ul>
 </section></details>
-<p class="muted">Generated 2026-11-09 11:37 UTC · commit e74e1d2 · static page, no scripts, no tracking.</p>
+<p class="muted">Generated 2026-11-09 11:41 UTC · commit fd58774 · static page, no scripts, no tracking.</p>
 </main></body></html>
