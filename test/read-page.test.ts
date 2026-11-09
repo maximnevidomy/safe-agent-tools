@@ -32,6 +32,10 @@ describe("channels", () => {
     expect(() => channelUrl("youtube", "UC123")).toThrow(/invalid/);
     expect(() => channelUrl("github-releases", "../../x")).toThrow(/invalid/);
   });
+  it("decodes numeric entities in feed titles", async () => {
+    const r = await readChannel("hackernews", "", mk("<rss><item><title>a&#x2F;b &#39;q&#39;</title><link>https://x.example/</link></item></rss>"));
+    expect(r[0]!.title).toBe("a/b 'q'");
+  });
   it("reads a feed and drops unsafe links", async () => {
     const xml = `<feed><entry><title>v1</title><link href="https://github.com/a/b/releases/tag/v1"/><updated>2026-01-01</updated></entry><entry><title>bad</title><link href="javascript:x"/></entry></feed>`;
     const r = await readChannel("github-releases", "a/b", mk(xml, "application/atom+xml"));

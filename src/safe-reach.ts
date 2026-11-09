@@ -22,7 +22,7 @@ export async function githubRepo(owner: string, repo: string, opts: { token?: st
 }
 
 const decode = (s: string) =>
-  s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
+  s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&#(x[0-9a-f]+|\d+);/gi, (_m, e: string) => { const n = e[0]!.toLowerCase() === "x" ? parseInt(e.slice(1), 16) : parseInt(e, 10); return n > 31 && n < 0x10ffff ? String.fromCodePoint(n) : " "; }).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&").trim();
 const tag = (block: string, name: string) => {
   const m = new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, "i").exec(block);
   return m ? decode(m[1]!) : "";
