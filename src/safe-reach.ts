@@ -67,7 +67,7 @@ export function vetRepo(meta: { stars: number; license: string | null; pushed_at
   if (!meta.license || meta.license === "NOASSERTION") signals.push({ level: "bad", text: "no clear license", points: -25 }); else signals.push({ level: "ok", text: `license ${meta.license}`, points: 0 });
   if (Number.isFinite(days)) signals.push({ level: days > 180 ? "bad" : days > 90 ? "warn" : "ok", text: `last push ${days} days ago`, points: days > 180 ? -25 : days > 90 ? -10 : 0 });
   if (meta.stars < 20) signals.push({ level: "warn", text: `only ${meta.stars} stars (young or unproven)`, points: -10 });
-  for (const f of readmeFindings.filter((x) => x.severity === "high")) signals.push({ level: "bad", text: `README risk: ${f.rule}`, points: -30 });
+  for (const f of readmeFindings.filter((x, i, a) => x.severity === "high" && a.findIndex((y) => y.rule === x.rule && y.severity === "high") === i)) signals.push({ level: "bad", text: `README risk: ${f.rule}`, points: -30 });
   const score = Math.max(0, 100 + signals.reduce((a, x) => a + x.points, 0));
   const verdict = signals.some((x) => x.level === "bad") ? "reject" : signals.some((x) => x.level === "warn") ? "review" : "ok";
   return { verdict, score, signals };

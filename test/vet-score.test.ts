@@ -13,6 +13,10 @@ describe("vetRepo score", () => {
     expect(r.verdict).toBe("reject"); expect(r.score).toBe(100 - 25 - 25 - 10 - 30);
     expect(r.signals.every((s) => typeof s.points === "number")).toBe(true);
   });
+  it("counts each README rule once, however many lines match", () => {
+    const f = { severity: "high" as const, rule: "pipe-to-shell" };
+    expect(vetRepo({ stars: 500, license: "MIT", pushed_at: day(3), archived: false }, [f, f, f, f], NOW).score).toBe(70);
+  });
   it("middling repo: review, score between", () => {
     const r = vetRepo({ stars: 5, license: "MIT", pushed_at: day(120), archived: false }, [], NOW);
     expect(r).toMatchObject({ verdict: "review", score: 80 });
