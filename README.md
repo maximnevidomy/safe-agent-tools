@@ -4,7 +4,12 @@
 
 Hardened rebuilds of ten popular "agent tool" ideas that are useful but weak on security, plus one showcase
 project that chains all ten in a single agent run and proves each works and each attack is stopped.
-TypeScript, zero runtime dependencies, 146 tests, `npm audit` clean.
+TypeScript, zero runtime dependencies, 224 tests, `npm audit` clean.
+
+**Start with these three (same order as the live demo):**
+1. `safe-fetch`: SSRF-safe web access for agents.
+2. `safe-reach`: audits a GitHub repo or page and gives a real safety score.
+3. `launch-check`: checks a live website for security and launch-readiness problems.
 
 ![demo](docs/demo.png)
 
