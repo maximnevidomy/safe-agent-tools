@@ -76,3 +76,39 @@ describe("Router", () => {
     expect(calls).toBe(3);
   });
 });
+
+import { RateLimitedError } from "../src/llm-router";
+describe("router upgrades", () => {
+  const mk = (id: string, fn: () => Promise<string>, extra: object = {}) => ({ id, maxSensitivity: "public" as const, call: fn, ...extra });
+  it("a 429 rests the provider for the time it asked, then it is used again", async () => {
+    let t = 0; let a429 = true;
+    const r = new Router({ now: () => t, providers: [mk("a", async () => { if (a429) throw new RateLimitedError(10_000); return "A"; }), mk("b", async () => "B")] });
+    expect((await r.complete("hi", "public")).provider).toBe("b");
+    a429 = false; expect((await r.complete("hi", "public")).provider).toBe("b"); // still resting
+    t = 11_000; expect((await r.complete("hi", "public")).provider).toBe("a");
+    expect(r.health()[0]!.rateLimited).toBe(1);
+  });
+  it("stays under a provider's requests-per-minute budget", async () => {
+    let t = 0; const r = new Router({ now: () => t, providers: [mk("a", async () => "A", { rpm: 2 }), mk("b", async () => "B")] });
+    const got = []; for (let i = 0; i < 3; i++) got.push((await r.complete("hi", "public")).provider);
+    expect(got).toEqual(["a", "a", "b"]); t = 61_000; expect((await r.complete("hi", "public")).provider).toBe("a");
+  });
+  it("fast strategy prefers the quicker provider once it has been observed", async () => {
+    let t = 0; const slow = async () => { t += 500; return "S"; }; const quick = async () => { t += 10; return "Q"; };
+    const r = new Router({ now: () => t, strategy: "fast", providers: [mk("slow", slow), mk("quick", quick)] });
+    await r.complete("x", "public"); // slow first (nothing observed), takes 500
+    expect((await r.complete("y", "public")).provider).toBe("quick");
+  });
+  it("sticky sessions keep a conversation on one provider; others do not follow", async () => {
+    let t = 0; let aDown = true;
+    const r = new Router({ now: () => t, providers: [mk("a", async () => { if (aDown) throw new Error("x"); return "A"; }), mk("b", async () => "B")] });
+    expect((await r.complete("1", "public", { session: "s1" })).provider).toBe("b");
+    aDown = false; expect((await r.complete("2", "public", { session: "s1" })).provider).toBe("b");
+    expect((await r.complete("3", "public", { session: "s2" })).provider).toBe("a");
+  });
+  it("opt-in cache serves repeats but never for secret data", async () => {
+    let n = 0; const r = new Router({ cacheMs: 1000, providers: [{ id: "L", maxSensitivity: "secret", call: async () => String(++n) }] });
+    expect((await r.complete("q", "internal")).cached).toBeUndefined(); expect((await r.complete("q", "internal")).cached).toBe(true);
+    await r.complete("q", "secret"); await r.complete("q", "secret"); expect(n).toBe(3);
+  });
+});

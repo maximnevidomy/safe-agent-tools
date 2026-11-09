@@ -10,6 +10,11 @@ export interface Provider {
   id: string;
   maxSensitivity: Sensitivity; // free/unknown providers: "public". Our own approved ones: "internal". Local model: "secret".
   call(prompt: string, signal: AbortSignal): Promise<string>;
+  rpm?: number; // optional ceiling: requests per minute this provider's free tier allows; the router stays under it
+}
+// Throw this from a provider on HTTP 429 so the router rests that provider for the time it asked for.
+export class RateLimitedError extends Error {
+  constructor(public retryAfterMs = 30_000) { super("rate limited"); this.name = "RateLimitedError"; }
 }
 export interface LogEntry {
   provider: string;
@@ -24,6 +29,9 @@ export interface RouterOptions {
   timeoutMs?: number;
   failuresBeforeOpen?: number;
   cooldownMs?: number;
+  strategy?: "order" | "fast" | "reliable"; // order = list order; fast/reliable = rank by what the router has observed
+  stickyMs?: number; // keep a conversation on the same provider for this long (default 30 min)
+  cacheMs?: number; // opt-in: reuse an identical answer for this long. Never used for "secret" data.
   log?: (e: LogEntry) => void;
   now?: () => number;
 }
@@ -64,33 +72,62 @@ export function redact(text: string): { text: string; count: number } {
 export class NoEligibleProviderError extends Error {}
 export class AllProvidersFailedError extends Error {}
 
+export interface ProviderStats { id: string; ok: number; fail: number; avgMs: number; rateLimited: number; restingUntil: number }
+
 export class Router {
   private fails = new Map<string, { n: number; openUntil: number }>();
+  private stats = new Map<string, ProviderStats>();
+  private calls = new Map<string, number[]>();
+  private sticky = new Map<string, { id: string; at: number }>();
+  private cache = new Map<string, { text: string; provider: string; at: number }>();
   constructor(private o: RouterOptions) {}
   private now() { return (this.o.now ?? Date.now)(); }
+  private st(id: string) { let s = this.stats.get(id); if (!s) this.stats.set(id, (s = { id, ok: 0, fail: 0, avgMs: 0, rateLimited: 0, restingUntil: 0 })); return s; }
+  health(): ProviderStats[] { return this.o.providers.map((p) => ({ ...this.st(p.id) })); }
+  private underRpm(p: Provider) {
+    if (!p.rpm) return true;
+    const recent = (this.calls.get(p.id) ?? []).filter((t) => t > this.now() - 60_000); this.calls.set(p.id, recent);
+    return recent.length < p.rpm;
+  }
+  private order(eligible: Provider[], session?: string) {
+    let list = [...eligible];
+    if (this.o.strategy === "fast") list.sort((a, b) => (this.st(a.id).avgMs || 1) - (this.st(b.id).avgMs || 1));
+    if (this.o.strategy === "reliable") { const rate = (id: string) => { const s = this.st(id); return s.ok + s.fail ? s.ok / (s.ok + s.fail) : 0.5; }; list.sort((a, b) => rate(b.id) - rate(a.id)); }
+    const hit = session ? this.sticky.get(session) : undefined;
+    if (hit && this.now() - hit.at < (this.o.stickyMs ?? 1_800_000)) { const i = list.findIndex((p) => p.id === hit.id); if (i > 0) list = [list[i]!, ...list.slice(0, i), ...list.slice(i + 1)]; }
+    return list;
+  }
 
-  async complete(prompt: string, sensitivity: Sensitivity = "internal"): Promise<{ text: string; provider: string }> {
+  async complete(prompt: string, sensitivity: Sensitivity = "internal", opts: { session?: string } = {}): Promise<{ text: string; provider: string; cached?: boolean }> {
     const eligible = this.o.providers.filter((p) => RANK[p.maxSensitivity] >= RANK[sensitivity]);
     if (!eligible.length) {
       throw new NoEligibleProviderError(`no provider is approved for "${sensitivity}" data; refusing to send`);
     }
+    const ckey = this.o.cacheMs && sensitivity !== "secret" ? `${sensitivity}|${prompt}` : "";
+    if (ckey) { const c = this.cache.get(ckey); if (c && this.now() - c.at < this.o.cacheMs!) return { text: c.text, provider: c.provider, cached: true }; }
     let lastErr = "";
-    for (const p of eligible) {
+    for (const p of this.order(eligible, opts.session)) {
       const st = this.fails.get(p.id);
-      if (st && st.openUntil > this.now()) continue; // circuit open
+      if (st && st.openUntil > this.now()) continue; // circuit open or resting after a 429
+      if (!this.underRpm(p)) { lastErr = "RateBudget"; continue; }
       const r = p.maxSensitivity === "secret" ? { text: prompt, count: 0 } : redact(prompt);
       const t0 = this.now();
       const ac = new AbortController();
       const timer = setTimeout(() => ac.abort(), this.o.timeoutMs ?? 30_000);
+      this.calls.set(p.id, [...(this.calls.get(p.id) ?? []), t0]);
       try {
         const text = await p.call(r.text, ac.signal);
         this.fails.delete(p.id);
-        this.o.log?.({ provider: p.id, ok: true, ms: this.now() - t0, promptChars: prompt.length, redactions: r.count });
+        const ms = this.now() - t0, s = this.st(p.id); s.ok++; s.avgMs = s.avgMs ? Math.round(s.avgMs * 0.7 + ms * 0.3) : ms;
+        if (opts.session) this.sticky.set(opts.session, { id: p.id, at: this.now() });
+        if (ckey) this.cache.set(ckey, { text, provider: p.id, at: this.now() });
+        this.o.log?.({ provider: p.id, ok: true, ms, promptChars: prompt.length, redactions: r.count });
         return { text, provider: p.id };
       } catch (e) {
         lastErr = (e as Error).name;
-        const n = (st?.n ?? 0) + 1;
-        this.fails.set(p.id, { n, openUntil: n >= (this.o.failuresBeforeOpen ?? 3) ? this.now() + (this.o.cooldownMs ?? 60_000) : 0 });
+        const s = this.st(p.id); s.fail++;
+        if (e instanceof RateLimitedError) { s.rateLimited++; s.restingUntil = this.now() + e.retryAfterMs; this.fails.set(p.id, { n: st?.n ?? 0, openUntil: s.restingUntil }); }
+        else { const n = (st?.n ?? 0) + 1; this.fails.set(p.id, { n, openUntil: n >= (this.o.failuresBeforeOpen ?? 3) ? this.now() + (this.o.cooldownMs ?? 60_000) : 0 }); }
         this.o.log?.({ provider: p.id, ok: false, ms: this.now() - t0, promptChars: prompt.length, redactions: r.count, error: lastErr });
       } finally {
         clearTimeout(timer);

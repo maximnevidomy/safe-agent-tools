@@ -22,10 +22,29 @@ const RULES: Rule[] = [
   { id: "unpinned-install", severity: "low", re: /\b(npx|pip install|npm i(nstall)?\s+-g)\s+[a-z@][^\s@]*(\s|$)/i, why: "installs an unpinned package" },
 ];
 
+const POPULAR = ["requests", "numpy", "pandas", "express", "lodash", "react", "axios", "flask", "django", "openai", "anthropic", "boto3", "urllib3", "colorama", "cryptography", "typescript", "webpack", "chalk", "moment", "commander"];
+const lev = (a: string, b: string) => { const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)] as number[]); for (let j = 1; j <= b.length; j++) d[0]![j] = j; for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length]![b.length]!; };
+// A package name one typo away from a famous one is a classic supply-chain trap.
+export function typosquat(line: string): string | null {
+  const m = /\b(?:npm\s+(?:i|install|add)|yarn\s+add|pnpm\s+add|pip3?\s+install)\s+((?:-{1,2}[\w-]+\s+)*)([A-Za-z0-9_.-]{3,40})/.exec(line);
+  const name = m?.[2]?.toLowerCase(); if (!name) return null;
+  const hit = POPULAR.find((p) => p !== name && Math.abs(p.length - name.length) <= 1 && lev(p, name) === 1);
+  return hit ?? null;
+}
+const FILE_RULES: Array<{ id: string; severity: Severity; why: string; test: (file: string, text: string) => string | null }> = [
+  { id: "nul-obfuscation", severity: "high", why: "NUL bytes hide text from reviewers and simple scanners", test: (_f, t) => (t.includes("\u0000") ? "contains NUL bytes" : null) },
+  { id: "bytecode-file", severity: "high", why: "compiled bytecode cannot be reviewed as text", test: (f) => (/\.(pyc|pyo|class|exe|dll|so|dylib)$/i.test(f) ? f : null) },
+  { id: "wide-permissions", severity: "medium", why: "asks for every tool or an unrestricted shell", test: (_f, t) => (/allowed-tools:\s*["']?(\*|Bash\(\*\)|Bash)["']?\s*$/im.test(t) ? "allowed-tools grants everything" : null) },
+];
+
 export function scanText(file: string, text: string): ScanResult {
   const findings: Finding[] = [];
+  for (const r of FILE_RULES) { const hit = r.test(file, text); if (hit) findings.push({ rule: r.id, severity: r.severity, line: 1, excerpt: hit.slice(0, 120), why: r.why }); }
   const lines = text.split(/\r?\n/);
   lines.forEach((ln, i) => {
+    const ts = typosquat(ln); if (ts) findings.push({ rule: "typosquat", severity: "high", line: i + 1, excerpt: ln.trim().slice(0, 120), why: `package name is one typo away from "${ts}"` });
+    if (/[A-Za-z0-9+/=_-]{240,}/.test(ln)) findings.push({ rule: "encoded-blob", severity: "medium", line: i + 1, excerpt: ln.trim().slice(0, 60) + "...", why: "a very long encoded string can hide a payload" });
+    if (/<!--[^>]*\b(assistant|agent|claude|ignore|system prompt|do not tell)\b[^>]*-->/i.test(ln)) findings.push({ rule: "hidden-comment", severity: "medium", line: i + 1, excerpt: ln.trim().slice(0, 120), why: "an HTML comment addressed to the agent is invisible when the file is rendered" });
     for (const r of RULES) {
       if (r.re.test(ln)) findings.push({ rule: r.id, severity: r.severity, line: i + 1, excerpt: ln.replace(/[​-‏‪-‮⁦-⁩]/gu, "�").trim().slice(0, 120), why: r.why });
     }
@@ -38,4 +57,11 @@ export function scanFiles(files: Array<{ path: string; text: string }>): { verdi
   const results = files.map((f) => scanText(f.path, f.text));
   const verdict = results.some((r) => r.verdict === "block") ? "block" : results.some((r) => r.verdict === "review") ? "review" : "pass";
   return { verdict, results };
+}
+
+// One number for a whole skill: each rule counts once per file so repetition does not hide or inflate the picture.
+export function scoreScan(results: ScanResult[]): { score: number; recommendation: "install" | "review first" | "do not install"; counts: Record<Severity, number> } {
+  const seen = new Set<string>(); const counts: Record<Severity, number> = { high: 0, medium: 0, low: 0 }; let pts = 0;
+  for (const r of results) for (const f of r.findings) { const k = `${r.file}|${f.rule}`; if (seen.has(k)) continue; seen.add(k); counts[f.severity]++; pts += f.severity === "high" ? 25 : f.severity === "medium" ? 8 : 2; }
+  return { score: Math.max(0, 100 - pts), recommendation: counts.high ? "do not install" : counts.medium ? "review first" : "install", counts };
 }
