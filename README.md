@@ -66,7 +66,7 @@ npm run showcase
 ```
 
 ## Safety score (measured, not claimed)
-CI runs on every push: tests, typecheck, `npm audit`, CodeQL, and OpenSSF Scorecard. Dependabot keeps
+CI runs on every push: tests, typecheck, `npm audit`, and CodeQL. Dependabot keeps
 dev dependencies current. The attack tests in `test/` are the executable part of the threat model.
 
 ## Verification status
