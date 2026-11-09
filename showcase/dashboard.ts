@@ -4,6 +4,7 @@ import { execSync } from "node:child_process";
 import { BENIGN_SKILLS, benignFalseAlarms, runAttacks, type AttackResult, type ToolId } from "./attacks";
 import { examples } from "./examples";
 import { TOOLS } from "./originals";
+import { TRY_BY_ID, type Field } from "./try";
 
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const cell = (r: AttackResult) => r.succeeded === null ? `<span class="na">n/a</span>` : r.succeeded ? `<span class="bad">got through</span>` : `<span class="ok">stopped</span>`;
@@ -16,7 +17,20 @@ export function gitMeta(): DashboardMeta {
   return { generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC", commit };
 }
 
-export async function buildDashboard(meta: DashboardMeta = gitMeta(), fragment = false): Promise<string> {
+const field = (f: Field) => {
+  const id = `f-${f.name}`;
+  const ctl = f.kind === "textarea" ? `<textarea id="${id}" name="${f.name}" rows="6" maxlength="${f.max}">${esc(f.value)}</textarea>`
+    : f.kind === "select" ? `<select id="${id}" name="${f.name}">${(f.options ?? []).map((o) => `<option${o === f.value ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`
+    : `<input id="${id}" name="${f.name}" type="text" maxlength="${f.max}" value="${esc(f.value)}" autocomplete="off" spellcheck="false">`;
+  const ex = (f.examples ?? []).map((e) => `<button type="button" class="ghost" data-fill="${f.name}" data-value="${esc(e.value)}">${esc(e.label)}</button>`).join("");
+  return `<div class="fld"><label for="${id}">${esc(f.label)}</label>${ctl}${ex ? `<div class="exs">${ex}</div>` : ""}</div>`;
+};
+const tryForm = (id: ToolId) => {
+  const d = TRY_BY_ID.get(id); if (!d) return "";
+  return `<h3>Try it yourself (live)</h3><form class="try" data-tool="${id}" autocomplete="off"><p class="muted">${esc(d.intro)}</p>${d.fields.map(field).join("")}<button type="submit">${esc(d.button)}</button><div class="out" aria-live="polite"></div></form>`;
+};
+
+export async function buildDashboard(meta: DashboardMeta = gitMeta(), fragment = false, live = false): Promise<string> {
   const [scores, ex] = await Promise.all([runAttacks(), examples()]);
   const ids = TOOLS.map((t) => t.id) as ToolId[];
   const avg = (k: "naiveScore" | "safeScore") => Math.round(ids.reduce((a, i) => a + scores[i][k], 0) / ids.length);
@@ -29,14 +43,15 @@ export async function buildDashboard(meta: DashboardMeta = gitMeta(), fragment =
     const also = t.original.also ? ` · also <a href="${esc(t.original.also.url)}" rel="noopener noreferrer">${esc(t.original.also.name)}</a>` : "";
     return `<section id="${t.id}">
 <h2><span class="n">${n + 1}</span>${esc(t.name)} <small>${esc(t.idea)}</small></h2>
-<div class="scores">${bar("Before (naive baseline)", s.naiveScore)}${bar("After (" + esc(t.name) + ")", s.safeScore)}<p class="muted">${s.applicable} attack attempts. Score = share of attacks stopped.</p></div>
+<div class="scores">${bar("Before: simple version (our baseline, not the original)", s.naiveScore)}${bar("After (" + esc(t.name) + ")", s.safeScore)}<p class="muted">${s.applicable} attack attempts. Score = share of attacks stopped.</p></div>
 <div class="grid">
 <div><h3>The original idea</h3><p><a href="${esc(t.original.url)}" rel="noopener noreferrer">${esc(t.original.name)}</a>${also}</p><p class="muted">From the tool library review: trust ${t.original.libraryTrust}/100 · ${esc(t.original.libraryStatus)}.<br>${esc(t.original.libraryNote)}</p></div>
 <div><h3>The problem</h3><p>${esc(t.problem)}</p></div>
 </div>
 <h3>What we changed</h3><ul>${t.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
-<h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Naive baseline</th><th>${esc(t.name)}</th></tr></thead><tbody>${rows}</tbody></table>
-<h3>It works: live example</h3><div class="ex"><div><b>Input</b><pre>${esc(e.input)}</pre></div><div><b>Result (produced when this page was built)</b><pre>${esc(e.output)}</pre></div></div>
+<h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Simple version</th><th>${esc(t.name)}</th></tr></thead><tbody>${rows}</tbody></table>
+${live ? tryForm(t.id) : ""}
+<h3>${live ? "Recorded example" : "It works: live example"}</h3><div class="ex"><div><b>Input</b><pre>${esc(e.input)}</pre></div><div><b>Result (recorded when this page was built)</b><pre>${esc(e.output)}</pre></div></div>
 ${e.simulated ? `<p class="muted">Simulated in this example: ${esc(e.simulated)}.</p>` : `<p class="muted">Nothing simulated: the real module ran on this machine.</p>`}
 <h3>Still not covered</h3><ul class="muted">${t.notCovered.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
 </section>`;
@@ -57,11 +72,15 @@ main{max-width:980px;margin:0 auto}a{color:var(--acc)}h1{font-size:1.9rem;margin
 .good{color:var(--good)}.mid{color:var(--mid)}.low{color:var(--low)}.muted{color:var(--mut);font-size:.9rem}
 nav{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}nav a{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:4px 12px;text-decoration:none;color:var(--fg);font-size:.9rem}
 section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin:18px 0}
-.bar{display:grid;grid-template-columns:190px 1fr 56px;align-items:center;gap:10px;margin:6px 0}.track{height:14px;background:var(--line);border-radius:7px;overflow:hidden}.fill{height:100%}.fill.good{background:var(--good)}.fill.mid{background:var(--mid)}.fill.low{background:var(--low)}.bar b{text-align:right}
+.bar{display:grid;grid-template-columns:260px 1fr 56px;align-items:center;gap:10px;margin:6px 0}.track{height:14px;background:var(--line);border-radius:7px;overflow:hidden}.fill{height:100%}.fill.good{background:var(--good)}.fill.mid{background:var(--mid)}.fill.low{background:var(--low)}.bar b{text-align:right}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
 table{width:100%;border-collapse:collapse;font-size:.92rem}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}th{color:var(--mut);font-weight:600}
 .ok{color:var(--good);font-weight:600}.bad{color:var(--low);font-weight:600}.na{color:var(--mut)}
 .ex{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:.85rem;margin:.3em 0}
+form.try{display:grid;gap:12px}.fld{display:grid;gap:4px}label{font-size:.85rem;color:var(--mut)}input,textarea,select{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}textarea{font-family:ui-monospace,Consolas,monospace;font-size:.85rem}
+button[type=submit]{justify-self:start;font:inherit;font-weight:600;background:var(--acc);color:var(--bg);border:0;border-radius:8px;padding:9px 18px;cursor:pointer}button:disabled{opacity:.6;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.exs{display:flex;flex-wrap:wrap;gap:6px}.ghost{font:inherit;font-size:.8rem;background:transparent;color:var(--acc);border:1px dashed var(--line);border-radius:999px;padding:3px 10px;cursor:pointer}
+.res{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:4px}.res.blocked{border-color:var(--good)}.res.allowed{border-color:var(--acc)}.res dl{display:grid;grid-template-columns:minmax(90px,max-content) 1fr;gap:4px 12px;margin:.6em 0 0}.res dt{color:var(--mut);font-size:.85rem}.res dd{margin:0;white-space:pre-wrap;word-break:break-word}.pic{display:block;max-width:180px;max-height:180px;border-radius:8px;margin-top:8px}
 .note{border-left:4px solid var(--mid);background:var(--card);padding:12px 16px;border-radius:0 10px 10px 0;margin:16px 0}li{margin:.2em 0}
 @media (max-width:560px){.bar{grid-template-columns:1fr 1fr 48px}.bar .bl{grid-column:1/-1}}
 </style>${open}<main>
@@ -69,8 +88,9 @@ table{width:100%;border-collapse:collapse;font-size:.92rem}th,td{text-align:left
 <p>Ten open-source agent-tool ideas, rebuilt with security first. Each section shows the original, its problem, a security score before and after, and a live example.</p>
 <div class="hero"><div class="stat"><b class="low">${avg("naiveScore")}%</b>average score, naive baseline</div><div class="stat"><b class="good">${avg("safeScore")}%</b>average score, our tools</div><div class="stat"><b>${totalAttacks}</b>attack attempts run</div><div class="stat"><b>${falseAlarms}</b>false alarms on ${BENIGN_SKILLS.length} harmless skills</div></div>
 <div class="note"><b>How to read the scores.</b> Every attack is run for real against two versions of the same idea: a deliberately simple "naive" version that we wrote, and our hardened tool. The score is the percentage of attacks stopped. The naive version is <b>not</b> the original project's code: we did not run or audit the originals. What we say about the originals comes from the tool library review and public repo metadata. 100% means "stopped every attack in this suite", not "unbreakable"; each section lists what is still not covered.</div>
+${live ? `<div class="note"><b>Try everything yourself.</b> Each tool has a live form. Your input is not stored, nothing runs on your computer, and results are shown as plain text. The server holds no secrets and limits how often each visitor can try.</div>` : ""}
 <nav>${nav}</nav>
 ${sections}
 <p class="muted">Generated ${esc(meta.generatedAt)} · commit ${esc(meta.commit)} · static page, no scripts, no tracking.</p>
-</main>${close}`;
+</main>${live ? `<script src="/app.js"></script>` : ""}${close}`;
 }

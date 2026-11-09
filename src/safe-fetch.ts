@@ -74,6 +74,9 @@ export interface Deps {
 
 export interface SafeFetchOptions {
   allowHosts: string[];
+  // Public-demo mode: any public hostname is allowed (no allowlist), but everything else stays on: https only,
+  // port 443 only, no credentials, every resolved address must be public, pinned connection, re-checked redirects.
+  allowAnyPublic?: boolean;
   allowPorts?: number[];
   maxBytes?: number;
   timeoutMs?: number;
@@ -125,7 +128,7 @@ export const defaultDeps: Deps = {
 };
 
 function validateUrl(raw: string | URL, opts: SafeFetchOptions): URL {
-  if (!opts.allowHosts?.length) throw new SafeFetchError("no_allowlist", "allowHosts must not be empty");
+  if (!opts.allowHosts?.length && opts.allowAnyPublic !== true) throw new SafeFetchError("no_allowlist", "allowHosts must not be empty");
   let url: URL;
   try {
     url = new URL(raw);
@@ -135,12 +138,14 @@ function validateUrl(raw: string | URL, opts: SafeFetchOptions): URL {
   if (url.protocol !== "https:") throw new SafeFetchError("bad_scheme", "only https is allowed");
   if (url.username || url.password) throw new SafeFetchError("bad_url", "credentials in URL are not allowed");
   const port = url.port ? Number(url.port) : 443;
-  if (!(opts.allowPorts ?? [443]).includes(port)) throw new SafeFetchError("bad_port", `port ${port} not allowed`);
+  if (!(opts.allowAnyPublic ? [443] : opts.allowPorts ?? [443]).includes(port)) throw new SafeFetchError("bad_port", `port ${port} not allowed`);
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (net.isIP(host)) {
     if (isBlockedIp(host)) throw new SafeFetchError("blocked_ip", "address is private or reserved");
   }
-  if (!hostAllowed(host, opts.allowHosts)) throw new SafeFetchError("host_not_allowed", `host ${host} is not in the allowlist`);
+  if (opts.allowAnyPublic) {
+    if (!net.isIP(host) && (!host.includes(".") || /(^|\.)(local|localhost|internal|lan|home|corp|intranet)$/i.test(host))) throw new SafeFetchError("host_not_allowed", "only public internet hostnames are allowed");
+  } else if (!hostAllowed(host, opts.allowHosts)) throw new SafeFetchError("host_not_allowed", `host ${host} is not in the allowlist`);
   return url;
 }
 

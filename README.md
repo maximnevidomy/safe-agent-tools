@@ -72,3 +72,10 @@ dev dependencies current. The attack tests in `test/` are the executable part of
 - Verified in a real browser: the live tab on a real project folder, the approval flow, the self-check tab.
 - Not verified from the build environment (no outbound internet there): live calls to the GitHub and Bybit APIs. Run the two cards once on your machine to confirm.
 - Not built: real sending of Instagram replies (needs a Meta Page token and app review; replies are logged to `data/outbox.jsonl`), a live LLM provider for `llm-router`.
+
+## Public live site (Render)
+
+`render.yaml` is a Render Blueprint for one free web service that runs `showcase/public-server.ts`: the dashboard plus a live "try it" form per tool. The process holds no secrets, has no folder access, stores no input, and rate-limits every visitor (and the whole site). Network tools run in public mode: any public https site on port 443, private networks always blocked.
+
+Deploy: Render dashboard, New, Blueprint, pick this repo. Optional env var `GITHUB_TOKEN` (a token with no scopes) raises GitHub's rate limit for the repo-vetting tool.
+The free plan sleeps after 15 minutes without traffic, so a monitor must call `/healthz` at least every 10 minutes to keep it awake.

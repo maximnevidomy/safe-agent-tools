@@ -10,7 +10,8 @@
     "showcase": "tsx showcase/run.ts",
     "scan": "tsx showcase/scan-dir.ts",
     "demo": "tsx showcase/server.ts",
-    "site": "tsx showcase/build-site.ts"
+    "site": "tsx showcase/build-site.ts",
+    "public": "tsx showcase/public-server.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -1,0 +1,14 @@
+# Render Blueprint: one free web service. Frankfurt is used because some exchanges block US addresses.
+services:
+  - type: web
+    name: safe-agent-tools
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci --include=dev
+    startCommand: npx tsx showcase/public-server.ts
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
