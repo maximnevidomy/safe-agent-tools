@@ -8,12 +8,21 @@ import { redact } from "./llm-router";
 
 const SKIP_DIRS = new Set([".git", "node_modules", ".ssh", ".aws", ".gnupg", "dist", "build"]);
 const SECRET_FILE = /(^\.env(\..*)?$)|(\.pem$)|(\.key$)|(^id_(rsa|ed25519|ecdsa))|(^credentials(\.json)?$)|(\.p12$)|(\.pfx$)|(^\.npmrc$)|(^\.netrc$)/i;
-const TEXT_EXT = new Set([".md", ".txt", ".ts", ".tsx", ".js", ".json", ".sql", ".yml", ".yaml", ".toml", ".py", ".html", ".css", ".csv"]);
+const TEXT_EXT = new Set([".md", ".txt", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".json", ".sql", ".yml", ".yaml", ".toml", ".py", ".go", ".rs", ".java", ".rb", ".php", ".sh", ".html", ".css", ".csv"]);
 const ENV_EXAMPLE = /^\.env\.(example|sample|template)$/i;
 
 export interface IndexOptions { maxFileBytes?: number; maxFiles?: number }
 interface Doc { rel: string; text: string; tokens: Map<string, number>; len: number }
-const tok = (s: string) => s.toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [];
+// Splits camelCase and snake_case so "getUserName" is found by "user" or "name", and keeps the whole word too.
+const tok = (s: string) => {
+  const out: string[] = [];
+  for (const w of s.match(/[\p{L}\p{N}_]{2,}/gu) ?? []) {
+    out.push(w.toLowerCase());
+    const parts = w.replace(/([\p{Ll}\d])(\p{Lu})/gu, "$1 $2").replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2").split(/[_\s]+/).filter((x) => x.length >= 2);
+    if (parts.length > 1) for (const x of parts) out.push(x.toLowerCase());
+  }
+  return out;
+};
 
 export class LocalIndex {
   private docs: Doc[] = [];
@@ -56,7 +65,7 @@ export class LocalIndex {
 
   get size() { return this.docs.length; }
 
-  search(query: string, k = 5): Array<{ path: string; score: number; snippet: string }> {
+  search(query: string, k = 5): Array<{ path: string; line: number; score: number; snippet: string }> {
     const q = [...new Set(tok(query))];
     if (!q.length) return [];
     const N = this.docs.length, avg = this.docs.reduce((a, d) => a + d.len, 0) / Math.max(N, 1);
@@ -72,7 +81,7 @@ export class LocalIndex {
     }).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, Math.min(k, 20));
     return scored.map(({ d, s }) => {
       const at = Math.max(0, d.text.toLowerCase().indexOf(q.find((t) => d.text.toLowerCase().includes(t)) ?? ""));
-      return { path: d.rel, score: +s.toFixed(3), snippet: redact(d.text.slice(Math.max(0, at - 60), at + 140).replace(/\s+/g, " ")).text };
+      return { path: d.rel, line: d.text.slice(0, at).split("\n").length, score: +s.toFixed(3), snippet: redact(d.text.slice(Math.max(0, at - 60), at + 140).replace(/\s+/g, " ")).text };
     });
   }
 
@@ -84,5 +93,18 @@ export class LocalIndex {
     if (!this.docs.some((d) => d.rel === path.relative(this.root, abs))) throw new Error("file is not in the index");
     if (fs.lstatSync(abs).isSymbolicLink()) throw new Error("symlinks are not readable");
     return redact(fs.readFileSync(abs, "utf8")).text;
+  }
+
+  // Go-to-definition: where is this function, class, type or constant defined? Returns file, line and the declaration line (redacted).
+  def(symbol: string, k = 10): Array<{ path: string; line: number; kind: string; text: string }> {
+    if (!/^[A-Za-z_$][\w$]{0,80}$/.test(symbol)) return [];
+    const e = symbol.replace(/\$/g, "\\$");
+    const re = new RegExp(`^\\s*(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(?:(function\\*?|class|interface|type|enum|const|let|var|def|fn|func|struct|trait|impl)\\s+${e}\\b|(public|private|protected|static)[\\w\\s<>\\[\\],]*\\s${e}\\s*\\()`);
+    const out: Array<{ path: string; line: number; kind: string; text: string }> = [];
+    for (const d of this.docs) {
+      const lines = d.text.split("\n");
+      for (let i = 0; i < lines.length && out.length < k; i++) { const m = re.exec(lines[i]!); if (m) out.push({ path: d.rel, line: i + 1, kind: m[1] ?? "method", text: redact(lines[i]!.trim().slice(0, 160)).text }); }
+    }
+    return out;
   }
 }

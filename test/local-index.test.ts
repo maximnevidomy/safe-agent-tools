@@ -53,3 +53,25 @@ describe("LocalIndex", () => {
     }
   });
 });
+
+describe("local-index upgrades", () => {
+  const mk = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "li-"));
+    fs.writeFileSync(path.join(dir, "a.ts"), "// helpers\nexport function getUserName(id: string) {\n  return id;\n}\nexport class OrderService {}\nconst MAX_RETRY_COUNT = 3;\n");
+    fs.writeFileSync(path.join(dir, "b.py"), "def fetch_user_name(x):\n    return x\n");
+    return LocalIndex.build(dir);
+  };
+  it("finds camelCase and snake_case code by its parts and reports the line", () => {
+    const idx = mk(); const r = idx.search("user name", 5);
+    expect(r.map((x) => x.path).sort()).toEqual(["a.ts", "b.py"]); expect(r.find((x) => x.path === "a.ts")!.line).toBeGreaterThanOrEqual(1);
+    expect(idx.search("retry")[0]!.path).toBe("a.ts");
+  });
+  it("go-to-definition finds functions, classes, constants and python defs, and rejects odd input", () => {
+    const idx = mk();
+    expect(idx.def("getUserName")).toEqual([expect.objectContaining({ path: "a.ts", line: 2, kind: "function" })]);
+    expect(idx.def("OrderService")[0]!.kind).toBe("class");
+    expect(idx.def("MAX_RETRY_COUNT")[0]!.line).toBe(6);
+    expect(idx.def("fetch_user_name")[0]).toEqual(expect.objectContaining({ path: "b.py", kind: "def" }));
+    expect(idx.def("nothing")).toEqual([]); expect(idx.def(".*")).toEqual([]); expect(idx.def("a(b")).toEqual([]);
+  });
+});

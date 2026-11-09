@@ -48,6 +48,14 @@ describe("live tools", () => {
     for (const action of ["create_order", "withdraw", "create_api_key"]) expect((await run("bybit-readonly", { action })).verdict).toBe("blocked");
     expect((await run("bybit-readonly", { symbol: "BTC/USDT; drop" })).headline).toMatch(/symbol/);
   });
+  it("ig-webhook comment-to-DM scenarios and local-index definitions", async () => {
+    const t = "send me the guide";
+    expect((await run("ig-webhook", { scenario: "Comment with the keyword (comment-to-DM)", text: t })).rows[0]![1]).toMatch(/dm_sent.*Here is the guide: https:\/\/example\.com\/r\/guide\./);
+    expect((await run("ig-webhook", { scenario: "Comment, but not following yet", text: t })).rows[0]![1]).toMatch(/needs_follow/);
+    expect((await run("ig-webhook", { scenario: "Same person comments twice", text: t })).rows[1]![1]).toMatch(/skipped_duplicate/);
+    expect((await run("ig-webhook", { scenario: "Comment on a different post", text: t })).rows[0]![1]).toMatch(/no_campaign/);
+    const d = await run("local-index", { symbol: "applyDiscountCode" }); expect(d.rows.map((r) => r.join(" ")).join("\n")).toMatch(/pricing\.ts:3 \(function\)/);
+  });
   it("safe-reach reads pages and feeds, and refuses private targets", async () => {
     const pg = await run("safe-reach", { action: "Read a web page", repo: "https://shop.example/" }); expect(pg.verdict).toBe("allowed");
     expect((await run("safe-reach", { action: "Read a web page", repo: "https://localhost/admin" })).verdict).toBe("blocked");

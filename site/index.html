@@ -107,7 +107,7 @@ bad  code scan: 4 finding(s), 1 committed secret file (-60)
 <div><h3>The original idea</h3><p><a href="https://github.com/explorearafat/InstaMation" rel="noopener noreferrer">InstaMation</a></p><p class="muted">From the tool library review: trust 35/100 · new, very small project.<br>Library review: very young project (6 stars); needs checking that it uses the official API only.</p></div>
 <div><h3>The problem</h3><p>A webhook is a public door. Without checking the sender&#39;s signature anyone can send fake messages, replays can make the bot answer twice, a flood can make it spam, and a bot that ignores &#39;stop&#39; or talks over a human gets the account reported and blocked.</p></div>
 </div>
-<h3>What we changed</h3><ul><li>Meta&#39;s HMAC signature is verified on the raw request bytes</li><li>Replays are dropped</li><li>Per-sender rate limit</li><li>&#39;Stop&#39; is honoured and &#39;start&#39; re-enables</li><li>Silent while a human has taken over</li><li>Message text is never stored</li></ul>
+<h3>What we changed</h3><ul><li>Comment-to-DM like the original: a keyword in a comment on a chosen post sends a private reply with the commenter&#39;s name and a tracked link, optional public reply, optional follow-first gate, one DM per person per campaign</li><li>Tracked links are signed and point only to a fixed table of https targets, so click counting cannot become an open redirect</li><li>Meta&#39;s HMAC signature is verified on the raw request bytes</li><li>Replays are dropped</li><li>Per-sender rate limit</li><li>&#39;Stop&#39; is honoured and &#39;start&#39; re-enables</li><li>Silent while a human has taken over</li><li>Message text is never stored</li></ul>
 <h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Simple version</th><th>ig-webhook</th></tr></thead><tbody><tr><td>Forged webhook from someone who is not Meta</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>The same delivery is replayed</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>User said &#39;stop&#39;, then writes again</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>One sender floods 20 messages in a second</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>A human already took over the chat</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr></tbody></table>
 
 <h3>It works: live example</h3><div class="ex"><div><b>Input</b><pre>1) signed message &#39;what&#39;s the price&#39;
@@ -116,7 +116,7 @@ bad  code scan: 4 finding(s), 1 committed secret file (-60)
 2) skipped_duplicate
 3) rejected: bad signature</pre></div></div>
 <p class="muted">Simulated in this example: Instagram (the signature check is the real code).</p>
-<h3>Still not covered</h3><ul class="muted"><li>This is the verification and decision core; the HTTP server, token storage and Meta&#39;s app review are the integrator&#39;s job</li><li>Meta&#39;s 24-hour messaging window is not enforced here</li></ul>
+<h3>Still not covered</h3><ul class="muted"><li>This is the verification and decision core; the HTTP server, token storage and Meta&#39;s app review are the integrator&#39;s job</li><li>Meta&#39;s 24-hour messaging window is not enforced here</li><li>Not built: AI replies, multiple Instagram accounts, agency workspaces, analytics dashboard, polling for missed events; the follow check needs your own Meta call</li></ul>
 </section>
 <section id="safe-exec">
 <h2><span class="n">6</span>safe-exec <small>Let an agent run command-line tools.</small></h2>
@@ -143,7 +143,7 @@ bad  code scan: 4 finding(s), 1 committed secret file (-60)
 <div><h3>The original idea</h3><p><a href="https://github.com/xerj-org/xerj" rel="noopener noreferrer">xerj</a></p><p class="muted">From the tool library review: trust 45/100 · rejected at the security gate.<br>Library review: installed with curl | sh from an unfamiliar domain, young repo with unusual star growth, optional reranking sends text to a third party.</p></div>
 <div><h3>The problem</h3><p>An index that reads everything under a folder will also index your .env file, private keys, and anything a symlink points to outside the folder. Search results then hand those secrets to the agent, and a path like ../ can read files far outside the project.</p></div>
 </div>
-<h3>What we changed</h3><ul><li>Never indexes .env, keys, credentials, symlinks, dependency folders or binary files</li><li>File reads are confined to the folder</li><li>Personal data is redacted in snippets</li><li>No network at all, nothing to install with a script</li></ul>
+<h3>What we changed</h3><ul><li>Code-aware search: finds getUserName by &#39;user&#39; or &#39;name&#39;, reports file and line, and a go-to-definition lookup for functions, classes and constants</li><li>Never indexes .env, keys, credentials, symlinks, dependency folders or binary files</li><li>File reads are confined to the folder</li><li>Personal data is redacted in snippets</li><li>No network at all, nothing to install with a script</li></ul>
 <h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Simple version</th><th>local-index</th></tr></thead><tbody><tr><td>Search for a secret that lives in .env</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Search for a private key file (id_rsa)</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Symlink inside the folder pointing to a file outside</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Read a file with ../ to escape the folder</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Snippets returned with a personal email address</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr></tbody></table>
 
 <h3>It works: live example</h3><div class="ex"><div><b>Input</b><pre>folder with plan.md, recipes.md and .env
@@ -152,7 +152,7 @@ search: hunter2</pre></div><div><b>Result (recorded when this page was built)</b
 snippet: Weekly squat plan. Ask [EMAIL] about form.
 search hunter2: 0 results (.env was skipped)</pre></div></div>
 <p class="muted">Nothing simulated: the real module ran on this machine.</p>
-<h3>Still not covered</h3><ul class="muted"><li>A secret pasted inside an ordinary text file is still indexed: keep the folder small and review it</li></ul>
+<h3>Still not covered</h3><ul class="muted"><li>A secret pasted inside an ordinary text file is still indexed: keep the folder small and review it</li><li>Keyword ranking only: no neural embeddings, no tree-sitter parsing, no PDF/DOCX/XLSX, no MCP server (xerj has all of these)</li></ul>
 </section>
 <section id="skill-scanner">
 <h2><span class="n">8</span>skill-scanner <small>Check an agent skill or plugin before installing it.</small></h2>
@@ -208,5 +208,5 @@ line 2 [high] anon-write-grant: anon can change or delete rows</pre></div></div>
 <p class="muted">Nothing simulated: the real module ran on this machine.</p>
 <h3>Still not covered</h3><ul class="muted"><li>It reads the migration history, not the live database: run it next to a live advisor check</li><li>The live-site check cannot see behind the login: row-level security, server-side auth and rate limits need the code or database</li><li>Not built yet: dependency vulnerability audit, git history scan, DNS email records (SPF, DKIM)</li></ul>
 </section>
-<p class="muted">Generated 2026-11-09 11:16 UTC · commit 072a55e · static page, no scripts, no tracking.</p>
+<p class="muted">Generated 2026-11-09 11:20 UTC · commit 7f50ae8 · static page, no scripts, no tracking.</p>
 </main></body></html>

@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { ApprovalGate, GateError } from "../src/approval-gate";
 import { createClient, ReadOnlyError } from "../src/bybit-readonly";
-import { handleEvent, verifySignature } from "../src/ig-webhook";
+import { handleCommentEvent, handleEvent, trackedLink, verifySignature } from "../src/ig-webhook";
 import { checkSite } from "../src/site-check";
 import { scanProject, verdict as launchVerdict } from "../src/launch-check";
 import { NoEligibleProviderError, Router, redact, type Sensitivity } from "../src/llm-router";
@@ -48,6 +48,7 @@ function sampleIndex() {
   const root = path.join(base, "notes"); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, "plan.md"), "Weekly plan: squat, row, press. Ask coach@example.com about form. Call 052-123-4567 to book.");
   fs.writeFileSync(path.join(root, "pricing.md"), "Monthly price 329 ILS. Annual price 2900 ILS. Discount code SPRING for the first month.");
+  fs.writeFileSync(path.join(root, "pricing.ts"), "// price helpers\nexport const MAX_DISCOUNT = 0.2;\nexport function applyDiscountCode(code: string, price: number) {\n  return price * (1 - MAX_DISCOUNT);\n}\n");
   fs.writeFileSync(path.join(root, "recipes.md"), "Chicken and rice. High protein breakfast: eggs and oats.");
   fs.writeFileSync(path.join(root, ".env"), "SUPABASE_SERVICE_KEY=demo-not-a-real-secret-hunter2");
   fs.writeFileSync(path.join(root, "id_rsa"), "-----BEGIN PRIVATE KEY-----\ndemo-not-a-real-key\n-----END PRIVATE KEY-----");
@@ -144,8 +145,8 @@ export const TRY: TryDef[] = [
       }
     } },
 
-  { id: "ig-webhook", network: false, button: "Deliver", intro: "A simulated Instagram message arrives at the webhook. Pick what happens. The signature check and decision logic are the real code; no Instagram account is involved.",
-    fields: [{ name: "text", label: "Customer message", kind: "text", max: 200, value: "מה המחיר?" }, { name: "scenario", label: "Scenario", kind: "select", max: 40, value: "Valid message", options: ["Valid message", "Forged signature", "Same delivery twice", "Customer said stop, then writes again", "A human took over the chat"] }],
+  { id: "ig-webhook", network: false, button: "Deliver", intro: "A simulated Instagram message or post comment arrives at the webhook. Pick what happens (the last four scenarios are comment-to-DM: type the word guide in the text). The signature check and decision logic are the real code; no Instagram account is involved.",
+    fields: [{ name: "text", label: "Customer message or comment", kind: "text", max: 200, value: "מה המחיר?", examples: [{ label: "A comment with the keyword", value: "send me the guide please" }] }, { name: "scenario", label: "Scenario", kind: "select", max: 40, value: "Valid message", options: ["Valid message", "Forged signature", "Same delivery twice", "Customer said stop, then writes again", "A human took over the chat", "Comment with the keyword (comment-to-DM)", "Comment, but not following yet", "Same person comments twice", "Comment on a different post"] }],
     async run(i) {
       const opted = new Set<string>(), handed = new Set<string>(), mids = new Set<string>(); const sent: string[] = [];
       const deps = { store: { isOptedOut: async (s: string) => opted.has(s), setOptedOut: async (s: string, v: boolean) => void (v ? opted.add(s) : opted.delete(s)), isHandedOver: async (s: string) => handed.has(s), seen: async (m: string) => (mids.has(m) ? true : (mids.add(m), false)) }, rules: [{ keywords: ["price", "מחיר"], reply: "329 per month" }], send: async (_: string, t: string) => void sent.push(t), allow: () => true };
@@ -158,9 +159,18 @@ export const TRY: TryDef[] = [
         case "Same delivery twice": { const b = mk(text, "dup1"); rows.push(await step("First delivery", b, sign(b))); rows.push(await step("Same delivery again", b, sign(b))); break; }
         case "Customer said stop, then writes again": { const a = mk("stop"); rows.push(await step("Customer: stop", a, sign(a))); const b = mk(text); rows.push(await step("Customer writes again", b, sign(b))); break; }
         case "A human took over the chat": { handed.add("12345678"); const b = mk(text); rows.push(await step("Message while a human is handling it", b, sign(b))); break; }
+        case "Comment with the keyword (comment-to-DM)": case "Comment, but not following yet": case "Same person comments twice": case "Comment on a different post": {
+          const gate = i.scenario === "Comment, but not following yet"; const dms: string[] = []; const pub: string[] = []; const seen2 = new Set<string>();
+          const cd = { store: deps.store, selfId: "99999999", campaigns: [{ id: "guide", keyword: "guide", mediaId: "POST1", dm: "Hi {username}! Here is the guide: {link}", publicReply: "Sent you a DM!", requireFollow: gate, followPrompt: "Follow the account first, then comment again." }], privateReply: async (_c: string, t: string) => void dms.push(t), publicReply: async (_c: string, t: string) => void pub.push(t), isFollower: async () => !gate, allow: () => true, link: (c: string, u: string) => trackedLink("https://example.com", IG_SECRET, c, u) };
+          const cm = (cid: string, media: string) => JSON.stringify({ entry: [{ changes: [{ field: "comments", value: { id: cid, text, from: { id: "12345678", username: "dana.s" }, media: { id: media } } }] }] });
+          const go = async (label: string, body: string) => { const o = verifySignature(body, sign(body), IG_SECRET) ? await handleCommentEvent(JSON.parse(body), cd) : ["REJECTED"]; rows.push([label, o.join(", ") + (dms.length ? ` (DM: ${dms[dms.length - 1]}${pub.length ? `; public reply: ${pub[pub.length - 1]}` : ""})` : "")]); };
+          if (i.scenario === "Comment on a different post") await go("Comment on a post with no campaign", cm("5551_1", "POST2"));
+          else { await go("First comment", cm("5551_1", "POST1")); if (i.scenario === "Same person comments twice") await go("Same person comments again", cm("5551_2", "POST1")); }
+          void seen2; break;
+        }
         default: { const b = mk(text); rows.push(await step("Signed message", b, sign(b))); }
       }
-      const stopped = rows.some(([, v]) => /REJECTED|skipped|opted_out/.test(v));
+      const stopped = rows.some(([, v]) => /REJECTED|skipped|opted_out|needs_follow|no_campaign/.test(v));
       return { verdict: stopped ? "blocked" : "allowed", headline: stopped ? "The webhook handled it safely." : "Replied.", rows };
     } },
 
@@ -174,9 +184,10 @@ export const TRY: TryDef[] = [
     } },
 
   { id: "local-index", network: false, button: "Search", intro: "A sample folder is indexed: notes, a pricing file, plus a .env file, a private key and a link pointing outside the folder. Search it, then try to read files you should not reach.",
-    fields: [{ name: "query", label: "Search for", kind: "text", max: 80, value: "price", examples: [{ label: "Look for the secret", value: "hunter2" }] }, { name: "file", label: "Read a file (optional)", kind: "text", max: 120, value: "", examples: [{ label: "Try: .env", value: ".env" }, { label: "Try: escape the folder", value: "../outside-secret.txt" }, { label: "Try: system file", value: "/etc/passwd" }, { label: "Try: the link", value: "link-to-outside.md" }, { label: "Read plan.md (emails hidden)", value: "plan.md" }] }],
+    fields: [{ name: "query", label: "Search for", kind: "text", max: 80, value: "price", examples: [{ label: "Look for the secret", value: "hunter2" }] }, { name: "symbol", label: "Find where a function or constant is defined (optional)", kind: "text", max: 60, value: "", examples: [{ label: "Try: applyDiscountCode", value: "applyDiscountCode" }, { label: "Try: MAX_DISCOUNT", value: "MAX_DISCOUNT" }] }, { name: "file", label: "Read a file (optional)", kind: "text", max: 120, value: "", examples: [{ label: "Try: .env", value: ".env" }, { label: "Try: escape the folder", value: "../outside-secret.txt" }, { label: "Try: system file", value: "/etc/passwd" }, { label: "Try: the link", value: "link-to-outside.md" }, { label: "Read plan.md (emails hidden)", value: "plan.md" }] }],
     async run(i) {
-      const { idx } = sampleIndex(); const hits = idx.search(i.query.slice(0, 80)); const rows: Array<[string, string]> = [["Indexed files", `${idx.size} (skipped: ${idx.skipped.map((s) => `${s.rel} [${s.reason}]`).join(", ")})`], ["Search results", hits.length ? hits.map((h) => `${h.path}: ${h.snippet}`).join("\n") : "no results"]];
+      const { idx } = sampleIndex(); const hits = idx.search(i.query.slice(0, 80)); const rows: Array<[string, string]> = [["Indexed files", `${idx.size} (skipped: ${idx.skipped.map((s) => `${s.rel} [${s.reason}]`).join(", ")})`], ["Search results", hits.length ? hits.map((h) => `${h.path}:${h.line}: ${h.snippet}`).join("\n") : "no results"]];
+      if (i.symbol.trim()) { const d = idx.def(i.symbol.trim()); rows.push(["Definition", d.length ? d.map((x) => `${x.path}:${x.line} (${x.kind}) ${x.text}`).join("\n") : "not found"]); }
       let verdict: TryOut["verdict"] = "allowed";
       if (i.file.trim()) { try { rows.push(["File content", cut(idx.readFile(i.file.trim()), 400)]); } catch (e) { verdict = "blocked"; rows.push(["File read", `REFUSED: ${(e as Error).message}`]); } }
       return { verdict, headline: verdict === "blocked" ? "The read was refused." : "Search done.", rows };
