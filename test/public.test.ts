@@ -56,6 +56,13 @@ describe("live tools", () => {
     expect((await run("ig-webhook", { scenario: "Comment on a different post", text: t })).rows[0]![1]).toMatch(/no_campaign/);
     const d = await run("local-index", { symbol: "applyDiscountCode" }); expect(d.rows.map((r) => r.join(" ")).join("\n")).toMatch(/pricing\.ts:3 \(function\)/);
   });
+  it("approval schedule, structured exec errors and change tracking", async () => {
+    const ok = await run("approval-gate", { scenario: "Scheduled post, runs on time" }); expect(ok.rows.map((r) => r.join(" ")).join("\n")).toMatch(/published[\s\S]*PUBLISHED/);
+    const late = await run("approval-gate", { scenario: "Scheduled post, server was off for 13 hours" }); expect(late.rows.map((r) => r.join(" ")).join("\n")).toMatch(/missed[\s\S]*not sent late/);
+    const ex = await run("safe-exec", { command: "whoami" }); expect(ex.verdict).toBe("blocked"); expect(ex.rows.map((r) => r.join(" ")).join("\n")).toMatch(/not_allowed[\s\S]*echo <text/);
+    const a = await run("safe-fetch", { url: "https://shop.example/p1" }); expect(a.rows[0]![1]).toMatch(/first time/);
+    const b = await run("safe-fetch", { url: "https://localhost/x" }); expect(b.verdict).toBe("blocked"); expect(b.rows.map((r) => r.join(" ")).join(" ")).toMatch(/What to do next/);
+  });
   it("safe-reach reads pages and feeds, and refuses private targets", async () => {
     const pg = await run("safe-reach", { action: "Read a web page", repo: "https://shop.example/" }); expect(pg.verdict).toBe("allowed");
     expect((await run("safe-reach", { action: "Read a web page", repo: "https://localhost/admin" })).verdict).toBe("blocked");

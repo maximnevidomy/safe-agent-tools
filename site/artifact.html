@@ -35,14 +35,14 @@ button[type=submit]{justify-self:start;font:inherit;font-weight:600;background:v
 <div><h3>The original idea</h3><p><a href="https://github.com/goodnight000/api-anything" rel="noopener noreferrer">API Anything</a></p><p class="muted">From the tool library review: trust 60/100 · passed the library&#39;s security gate.<br>No flags in the library review. The risk below comes from the kind of tool, not from a finding in this repo.</p></div>
 <div><h3>The problem</h3><p>A tool that fetches whatever URL the agent gives it can be tricked, by the agent or by text the agent read, into calling things on your own network: your laptop&#39;s admin pages, your cloud&#39;s secret-credentials address (169.254.169.254), internal services. This attack is called SSRF and it is one of the most common ways a fetch tool turns into a break-in.</p></div>
 </div>
-<h3>What we changed</h3><ul><li>Allowlist of hosts by default, https only (the live demo uses a public mode: any public website, still https and port 443 only, with every private range blocked)</li><li>Every address a name resolves to is checked; private and reserved ranges are refused</li><li>The connection is pinned to the address that was checked (no DNS trick between check and connect)</li><li>Every redirect is re-checked from scratch</li><li>Size cap, time cap, per-caller rate limiter</li></ul>
+<h3>What we changed</h3><ul><li>Operates politely like the original: a short cache window, a per-site request budget and change tracking (what changed in price or name since your last check)</li><li>Every failure says its class and what to do next (blocked forever, retry later, use the official API)</li><li>Allowlist of hosts by default, https only (the live demo uses a public mode: any public website, still https and port 443 only, with every private range blocked)</li><li>Every address a name resolves to is checked; private and reserved ranges are refused</li><li>The connection is pinned to the address that was checked (no DNS trick between check and connect)</li><li>Every redirect is re-checked from scratch</li><li>Size cap, time cap, per-caller rate limiter</li></ul>
 <h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Simple version</th><th>safe-fetch</th></tr></thead><tbody><tr><td>Agent asked to fetch a local admin page (https://127.0.0.1/admin)</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Trusted site redirects to the cloud metadata address (169.254.169.254)</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>A normal-looking name that resolves to a private address (10.0.0.5)</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Plain http:// request (no encryption)</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Server returns a 5 MB body (memory bomb)</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr></tbody></table>
 
 <h3>It works: live example</h3><div class="ex"><div><b>Input</b><pre>1) fetch https://api.example.com/data (allowed host)
 2) fetch https://169.254.169.254/latest/meta-data/</pre></div><div><b>Result (recorded when this page was built)</b><pre>1) HTTP 200, connection pinned to 93.184.216.34
 2) refused: address is private or reserved</pre></div></div>
 <p class="muted">Simulated in this example: DNS and the web server.</p>
-<h3>Still not covered</h3><ul class="muted"><li>A malicious page on an allowed host can still return hostile text: treat results as untrusted data</li><li>GET only; no proxy support</li></ul>
+<h3>Still not covered</h3><ul class="muted"><li>Does not learn a site&#39;s hidden internal requests, and does not use your browser session or cookies: that is the original&#39;s main trick and its main risk. Pages that need JavaScript or a login to show the price are not read</li><li>A malicious page on an allowed host can still return hostile text: treat results as untrusted data</li><li>GET only; no proxy support</li></ul>
 </section>
 <section id="llm-router">
 <h2><span class="n">2</span>llm-router <small>Send questions to many AI providers and fail over when one is down.</small></h2>
@@ -125,7 +125,7 @@ bad  code scan: 4 finding(s), 1 committed secret file (-60)
 <div><h3>The original idea</h3><p><a href="https://github.com/HKUDS/CLI-Anything" rel="noopener noreferrer">CLI-Anything</a></p><p class="muted">From the tool library review: trust 75/100 · passed the library&#39;s security gate.<br>No flags in the library review. The risk below comes from the kind of tool, not from a finding in this repo.</p></div>
 <div><h3>The problem</h3><p>Running a command built from text the agent wrote is the classic injection hole: one stray &#39;&amp;&amp;&#39; or &#39;;&#39; and the agent&#39;s text becomes a second command. The child process also inherits every secret in your environment, and a runaway command can print forever or never stop.</p></div>
 </div>
-<h3>What we changed</h3><ul><li>Commands are chosen by name from an allowlist and mapped to absolute paths</li><li>No shell, so special characters are just text</li><li>Argument count, length and per-command rules</li><li>The child gets a clean environment</li><li>Hard timeout and output cap</li></ul>
+<h3>What we changed</h3><ul><li>Agents get one stable JSON answer for every call, success or failure, with an error class and a next step, and can read the allowlist (names, usage) before calling</li><li>Commands are chosen by name from an allowlist and mapped to absolute paths</li><li>No shell, so special characters are just text</li><li>Argument count, length and per-command rules</li><li>The child gets a clean environment</li><li>Hard timeout and output cap</li></ul>
 <h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Simple version</th><th>safe-exec</th></tr></thead><tbody><tr><td>Shell injection: hi &amp;&amp; run my script</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Agent asks to run a tool that is not on the list (whoami)</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Script reads a secret from the parent environment</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Command prints 3 MB of output</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Command that runs far too long (1.5 s vs a 0.4 s limit)</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr></tbody></table>
 
 <h3>It works: live example</h3><div class="ex"><div><b>Input</b><pre>1) echo hello
@@ -134,7 +134,7 @@ bad  code scan: 4 finding(s), 1 committed secret file (-60)
 2) hi &amp;&amp; whoami   &lt;- printed as text, not run
 3) command &quot;whoami&quot; is not allowlisted</pre></div></div>
 <p class="muted">Nothing simulated: the real module ran on this machine.</p>
-<h3>Still not covered</h3><ul class="muted"><li>What an allowed program does with its arguments is still up to that program: add per-command rules and avoid allowing interpreters</li></ul>
+<h3>Still not covered</h3><ul class="muted"><li>It does not generate a command-line tool for any software like CLI-Anything: you list the programs you trust, one by one</li><li>What an allowed program does with its arguments is still up to that program: add per-command rules and avoid allowing interpreters</li></ul>
 </section>
 <section id="local-index">
 <h2><span class="n">7</span>local-index <small>Search your own code and notes so an agent has context.</small></h2>
@@ -178,7 +178,7 @@ line 2 [high] prompt-injection: tries to override the agent&#39;s instructions o
 <div><h3>The original idea</h3><p><a href="https://github.com/Shaitrish/37studio" rel="noopener noreferrer">37studio</a></p><p class="muted">From the tool library review: trust 50/100 · passed the library&#39;s security gate.<br>No flags in the library review. It auto-publishes to 9 platforms with your own keys; the risk below comes from the kind of tool.</p></div>
 <div><h3>The problem</h3><p>A simple &#39;approved: true&#39; flag is not enough. The text can be changed after approval, one approval can be reused, an old approval can be used days later, and an unsigned token can be written by the agent itself.</p></div>
 </div>
-<h3>What we changed</h3><ul><li>Approval is a signed token bound to a hash of the exact payload</li><li>Single use</li><li>Expires after minutes</li><li>Signed with a secret the agent does not hold</li></ul>
+<h3>What we changed</h3><ul><li>Scheduling like 37studio: a post goes out at its time only with an approval for exactly that text; if the server was off and the post is more than 12 hours late it is marked missed and never sent late</li><li>A human can also reject a proposal for good, and set how long an approval lasts (up to 7 days)</li><li>Approval is a signed token bound to a hash of the exact payload</li><li>Single use</li><li>Expires after minutes</li><li>Signed with a secret the agent does not hold</li></ul>
 <h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Simple version</th><th>approval-gate</th></tr></thead><tbody><tr><td>Agent runs an action nobody approved</td><td><span class="ok">stopped</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Text is changed after the human approved it</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>One approval is used twice</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>An old approval is used a day later</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr><tr><td>Agent writes its own approval token</td><td><span class="bad">got through</span></td><td><span class="ok">stopped</span></td></tr></tbody></table>
 
 <h3>It works: live example</h3><div class="ex"><div><b>Input</b><pre>1) publish without approval
@@ -189,7 +189,7 @@ line 2 [high] prompt-injection: tries to override the agent&#39;s instructions o
 3) published
 4) approval already used</pre></div></div>
 <p class="muted">Nothing simulated: the real module ran on this machine.</p>
-<h3>Still not covered</h3><ul class="muted"><li>A human who approves without reading defeats it</li><li>Its store is in memory: use a database for production</li></ul>
+<h3>Still not covered</h3><ul class="muted"><li>No publishing to the 9 platforms, video editor or Autopilot: this is the safety gate you put in front of those, not a replacement</li><li>A human who approves without reading defeats it</li><li>Its store is in memory: use a database for production</li></ul>
 </section>
 <section id="launch-check">
 <h2><span class="n">10</span>launch-check <small>A check to run before launching an app built with Supabase or Lovable.</small></h2>
@@ -208,5 +208,5 @@ line 2 [high] anon-write-grant: anon can change or delete rows</pre></div></div>
 <p class="muted">Nothing simulated: the real module ran on this machine.</p>
 <h3>Still not covered</h3><ul class="muted"><li>It reads the migration history, not the live database: run it next to a live advisor check</li><li>The live-site check cannot see behind the login: row-level security, server-side auth and rate limits need the code or database</li><li>Not built yet: dependency vulnerability audit, git history scan, DNS email records (SPF, DKIM)</li></ul>
 </section>
-<p class="muted">Generated 2026-11-09 11:20 UTC · commit 7f50ae8 · static page, no scripts, no tracking.</p>
+<p class="muted">Generated 2026-11-09 11:25 UTC · commit 73d5bc6 · static page, no scripts, no tracking.</p>
 </main>

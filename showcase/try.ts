@@ -4,7 +4,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ApprovalGate, GateError } from "../src/approval-gate";
+import { ApprovalGate, GateError, PostQueue } from "../src/approval-gate";
 import { createClient, ReadOnlyError } from "../src/bybit-readonly";
 import { handleCommentEvent, handleEvent, trackedLink, verifySignature } from "../src/ig-webhook";
 import { checkSite } from "../src/site-check";
@@ -12,7 +12,8 @@ import { scanProject, verdict as launchVerdict } from "../src/launch-check";
 import { NoEligibleProviderError, Router, redact, type Sensitivity } from "../src/llm-router";
 import { LocalIndex } from "../src/local-index";
 import { extractPrice } from "../src/price-extract";
-import { safeExec, ExecError } from "../src/safe-exec";
+import { safeExec, execJson, describePolicy, ExecError } from "../src/safe-exec";
+import { WatchFetch } from "../src/watch-fetch";
 import { Deps, SafeFetchError, defaultDeps, safeFetch } from "../src/safe-fetch";
 import { CHANNELS, auditRepo, readChannel, type Channel } from "../src/safe-reach";
 import { readPage } from "../src/read-page";
@@ -57,6 +58,10 @@ function sampleIndex() {
   return (sample = { root, idx: LocalIndex.build(root) });
 }
 
+const watchers = new WeakMap<object, WatchFetch>();
+const watcher = (deps: Deps) => { let w = watchers.get(deps); if (!w) watchers.set(deps, (w = new WatchFetch({ deps, cacheMs: 30_000, perHostPerMin: 8 }))); return w; };
+const BLOCKED_CLASSES = new Set(["bad_scheme", "bad_url", "bad_port", "blocked_ip", "host_not_allowed", "bad_redirect", "budget"]);
+
 const IG_SECRET = randomBytes(24).toString("hex");
 const GATE_SECRET = randomBytes(24).toString("hex");
 
@@ -65,7 +70,9 @@ export const TRY: TryDef[] = [
     fields: [{ name: "url", label: "Product page link", kind: "text", max: 400, value: "", examples: [{ label: "Try an attack: cloud secrets address", value: "https://169.254.169.254/latest/meta-data/" }, { label: "Try an attack: plain http", value: "http://example.com/" }, { label: "Try an attack: private network", value: "https://localhost/admin" }] }],
     async run(i, c) {
       const url = i.url.trim();
-      let page; try { page = await safeFetch(url, { allowHosts: [], allowAnyPublic: true, maxBytes: 1_500_000, timeoutMs: 8000, headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (compatible; SafeAgentToolsDemo/1.0)" } }, c.deps); } catch (e) { return fetchError(e); }
+      const wf = await watcher(c.deps).get(url, { allowHosts: [], allowAnyPublic: true, maxBytes: 1_500_000, timeoutMs: 8000, headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (compatible; SafeAgentToolsDemo/1.0)" } });
+      if (!wf.ok) return { verdict: BLOCKED_CLASSES.has(wf.error.class) ? "blocked" : "info", headline: FETCH_MSG[wf.error.class] ?? wf.error.message, rows: [["Error class", wf.error.class], ["What to do next", wf.error.next]] };
+      const page = { status: wf.status, headers: wf.headers, body: wf.body, url: wf.url };
       const ct = String(page.headers["content-type"] ?? "");
       if (page.status !== 200) return { verdict: "info", headline: `The site answered HTTP ${page.status}, so there is nothing to read.`, rows: [] };
       if (!/html|xml/i.test(ct)) return { verdict: "info", headline: "That link is not a web page.", rows: [["content-type", cut(ct, 60)]] };
@@ -73,7 +80,9 @@ export const TRY: TryDef[] = [
       let image: string | undefined;
       if (r.image) { try { const im = await safeFetch(r.image, { allowHosts: [], allowAnyPublic: true, maxBytes: 600_000, timeoutMs: 6000 }, c.deps); const mime = im.status === 200 ? IMG_MAGIC(im.body) : null; if (mime) image = `data:${mime};base64,${im.body.toString("base64")}`; } catch { /* image is optional */ } }
       const money = (n: number | null) => (n === null ? "none" : `${n}${r.currency ? " " + r.currency : ""}`);
-      return { verdict: "allowed", headline: r.found ? (r.onSale ? "Found a sale price." : "Found a price.") : "No price found.", image, rows: [["Name", r.name ?? "none"], ["Regular price", money(r.regularPrice)], ["Sale price", money(r.salePrice)], ["Image", image ? "fetched safely (shown below)" : "none"], ["Read from", r.source], ...(r.note ? [["Note", r.note] as [string, string]] : [])] };
+      const ch = r.found ? watcher(c.deps).track(page.url, { name: r.name ?? "", regular: String(r.regularPrice ?? ""), sale: String(r.salePrice ?? "") }) : null;
+      const sinceRow: Array<[string, string]> = ch ? [["Since the last check", ch.first ? "first time this page was checked here; check again later to see price changes" : ch.changes.length ? ch.changes.map((x) => `${x.field}: ${x.before || "none"} -> ${x.after || "none"}`).join(", ") : "no change"]] : [];
+      return { verdict: "allowed", headline: r.found ? (r.onSale ? "Found a sale price." : "Found a price.") : "No price found.", image, rows: [...sinceRow, ["Name", r.name ?? "none"], ["Regular price", money(r.regularPrice)], ["Sale price", money(r.salePrice)], ["Image", image ? "fetched safely (shown below)" : "none"], ["Read from", r.source], ...(r.note ? [["Note", r.note] as [string, string]] : []), ...(wf.cached ? [["Served from", "a 30-second cache window, so repeated clicks do not hit the shop again"] as [string, string]] : [])] };
     } },
 
   { id: "llm-router", network: false, button: "Route it", intro: "Type a message with private details and choose how sensitive the data is. Two pretend providers exist: a free one approved only for public data, and a private one approved for internal data. Nothing is sent to a real AI.",
@@ -178,9 +187,11 @@ export const TRY: TryDef[] = [
     fields: [{ name: "command", label: "Command name", kind: "text", max: 40, value: "echo", examples: [{ label: "Try another command", value: "whoami" }, { label: "Try a shell trick", value: "echo; cat /etc/passwd" }] }, { name: "arg", label: "Text to print", kind: "text", max: 80, value: "hello && whoami" }],
     async run(i) {
       const PRINT = "console.log(process.argv[1])";
-      const policy = { commands: { echo: { path: process.execPath, maxArgs: 3, checkArgs: (a: string[]) => (a.length === 3 && a[0] === "-e" && a[1] === PRINT && a[2]!.length <= 80 ? null : "only the fixed print script is allowed") } }, env: {} as Record<string, string>, timeoutMs: 4000, maxOutputBytes: 4000 };
-      try { const r = await safeExec(policy, i.command.trim(), ["-e", PRINT, i.arg.slice(0, 80)]); return { verdict: "allowed", headline: "Ran the allowed command.", rows: [["Output", r.stdout.trim() || "(empty)"], ["Note", "Special characters stay plain text. There is no shell to interpret them."]] }; }
-      catch (e) { if (e instanceof ExecError) return blocked(`Refused: ${e.message}`, [["Allowed commands", "echo"]]); throw e; }
+      const policy = { commands: { echo: { path: process.execPath, description: "Print the given text", usage: "echo <text up to 80 characters>", maxArgs: 3, checkArgs: (a: string[]) => (a.length === 3 && a[0] === "-e" && a[1] === PRINT && a[2]!.length <= 80 ? null : "only the fixed print script is allowed") } }, env: {} as Record<string, string>, timeoutMs: 4000, maxOutputBytes: 4000 };
+      const r = await execJson(policy, i.command.trim(), ["-e", PRINT, i.arg.slice(0, 80)]);
+      const shape = JSON.stringify({ ok: r.ok, command: r.command, code: r.code, stdout: r.stdout.trim().slice(0, 80), timedOut: r.timedOut, truncated: r.truncated, ...(r.error ? { error: r.error } : {}) }, null, 1);
+      if (!r.ok) return blocked(`Refused: ${r.error?.message ?? "failed"}`, [["What the agent receives", shape], ["What the agent can discover", describePolicy(policy).map((d) => `${d.name}: ${d.usage}`).join("\n")]]);
+      return { verdict: "allowed", headline: "Ran the allowed command.", rows: [["Output", r.stdout.trim() || "(empty)"], ["What the agent receives", shape], ["Note", "Special characters stay plain text. There is no shell to interpret them."]] };
     } },
 
   { id: "local-index", network: false, button: "Search", intro: "A sample folder is indexed: notes, a pricing file, plus a .env file, a private key and a link pointing outside the folder. Search it, then try to read files you should not reach.",
@@ -198,7 +209,7 @@ export const TRY: TryDef[] = [
     async run(i) { const r = scanText("pasted-skill", i.text); const sc = scoreScan([r]); return { verdict: r.verdict === "pass" ? "allowed" : "blocked", headline: `Safety score ${sc.score}/100, ${sc.recommendation.toUpperCase()}`, rows: r.findings.length ? r.findings.slice(0, 30).map((f) => [`line ${f.line} [${f.severity}]`, `${f.rule}: ${f.why}`] as [string, string]) : [["Findings", "none"]] }; } },
 
   { id: "approval-gate", network: false, button: "Try it", intro: "An agent wants to publish a post. Pick what the agent attempts. A human's approval is a signed, single-use token tied to the exact text.",
-    fields: [{ name: "text", label: "Post text", kind: "text", max: 200, value: "New: three squat variations" }, { name: "scenario", label: "What the agent tries", kind: "select", max: 50, value: "Publish with no approval", options: ["Publish with no approval", "Human approved, agent changes the text", "Human approved, agent publishes the same text", "Agent re-uses the same approval", "Agent forges its own token"] }],
+    fields: [{ name: "text", label: "Post text", kind: "text", max: 200, value: "New: three squat variations" }, { name: "scenario", label: "What the agent tries", kind: "select", max: 50, value: "Publish with no approval", options: ["Publish with no approval", "Human approved, agent changes the text", "Human approved, agent publishes the same text", "Agent re-uses the same approval", "Agent forges its own token", "Scheduled post, runs on time", "Scheduled post, server was off for 13 hours"] }],
     async run(i) {
       const g = new ApprovalGate(GATE_SECRET); const post = { text: i.text.slice(0, 200) }; const pub = async () => "PUBLISHED";
       const attempt = async (label: string, token: string, p: unknown): Promise<[string, string]> => { try { return [label, await g.execute(token, "publish", p, pub)]; } catch (e) { return [label, e instanceof GateError ? `REFUSED (${e.code}): ${e.message}` : "REFUSED"]; } };
@@ -209,6 +220,16 @@ export const TRY: TryDef[] = [
         case "Human approved, agent publishes the same text": rows.push(await attempt("Agent publishes the approved text", approved(), post)); break;
         case "Agent re-uses the same approval": { const t = approved(); rows.push(await attempt("First publish", t, post)); rows.push(await attempt("Second publish, same approval", t, post)); break; }
         case "Agent forges its own token": rows.push(await attempt("Agent invents a token", Buffer.from(JSON.stringify({ id: "x", a: "publish", exp: 9e15 })).toString("base64url") + "." + "0".repeat(64), post)); break;
+        case "Scheduled post, runs on time": case "Scheduled post, server was off for 13 hours": {
+          let clock = 0; const g2 = new ApprovalGate(GATE_SECRET, 600_000, () => clock); const q = new PostQueue(g2, () => clock, 12 * 3_600_000); const out: string[] = [];
+          const tok = g2.approve(g2.propose("publish", post, "post").id, "human", 3 * 86_400_000);
+          q.schedule(tok, "publish", post, 3_600_000, async () => void out.push("PUBLISHED"));
+          clock = 1_800_000; rows.push(["30 minutes in (post is due at 1 hour)", (await q.tick()).map((x) => x.status).join(", ") || "nothing due yet"]);
+          clock = i.scenario === "Scheduled post, runs on time" ? 3_700_000 : 3_600_000 + 13 * 3_600_000;
+          const r2 = await q.tick(); rows.push([i.scenario === "Scheduled post, runs on time" ? "At the scheduled time" : "13 hours after the scheduled time", r2.map((x) => x.status + (x.detail ? ` (${x.detail})` : "")).join(", ")]);
+          if (out.length) rows.push(["Result", "PUBLISHED, with the approval given earlier for exactly this text"]); else rows.push(["Result", "REFUSED: not sent late. A new approval is needed."]);
+          break;
+        }
         default: rows.push(await attempt("Agent publishes with no approval", "", post));
       }
       const refused = rows.some(([, v]) => v.startsWith("REFUSED"));

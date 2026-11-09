@@ -29,13 +29,19 @@ export class ApprovalGate {
     return p;
   }
   // Human side: only this call mints a token. Do not expose it to the agent.
-  approve(id: string, approver: string): string {
+  approve(id: string, approver: string, ttlMs = this.ttlMs): string {
+    if (!(ttlMs > 0) || ttlMs > 7 * 86_400_000) throw new GateError("bad_ttl", "approval lifetime must be between 1 ms and 7 days");
     const p = this.pending.get(id);
     if (!p) throw new GateError("unknown_proposal", "no such proposal");
     this.pending.delete(id);
-    const body = JSON.stringify({ id: p.id, a: p.action, ph: p.payloadHash, by: approver, exp: this.now() + this.ttlMs });
+    const body = JSON.stringify({ id: p.id, a: p.action, ph: p.payloadHash, by: approver, exp: this.now() + ttlMs });
     return Buffer.from(body).toString("base64url") + "." + this.sign(body);
   }
+  // Human side: say no. The proposal disappears and can never be approved later.
+  reject(id: string): void {
+    if (!this.pending.delete(id)) throw new GateError("unknown_proposal", "no such proposal");
+  }
+  listPending(): Pending[] { return [...this.pending.values()]; }
   // Agent side: run the action only with a valid token for exactly this action + payload.
   async execute<T>(token: string, action: string, payload: unknown, run: () => Promise<T>): Promise<T> {
     const [b64, sig] = String(token).split(".");
@@ -50,5 +56,34 @@ export class ApprovalGate {
     if (this.used.has(t.id)) throw new GateError("replayed", "approval already used");
     this.used.add(t.id);
     return run();
+  }
+}
+
+// Scheduled publishing on top of the gate (the 37studio idea): a post goes out at its time only with a valid approval for
+// exactly that content. A post that is overdue by more than `missedAfterMs` is marked "missed" and is NOT sent late.
+export type QueueStatus = "scheduled" | "published" | "missed" | "refused";
+export interface QueueItem { id: string; action: string; runAt: number; status: QueueStatus; detail?: string }
+export class PostQueue {
+  private items = new Map<string, QueueItem & { token: string; payload: unknown; run: () => Promise<unknown> }>();
+  constructor(private gate: ApprovalGate, private now: () => number = Date.now, private missedAfterMs = 12 * 3_600_000) {}
+  schedule(token: string, action: string, payload: unknown, runAt: number, run: () => Promise<unknown>): string {
+    if (!Number.isFinite(runAt)) throw new GateError("bad_time", "runAt must be a time");
+    const id = randomBytes(8).toString("hex");
+    this.items.set(id, { id, action, runAt, status: "scheduled", token, payload, run });
+    return id;
+  }
+  list(): QueueItem[] { return [...this.items.values()].map(({ id, action, runAt, status, detail }) => ({ id, action, runAt, status, detail })); }
+  async tick(): Promise<QueueItem[]> {
+    const done: QueueItem[] = [];
+    for (const it of this.items.values()) {
+      if (it.status !== "scheduled" || it.runAt > this.now()) continue;
+      if (this.now() - it.runAt > this.missedAfterMs) { it.status = "missed"; it.detail = "overdue; not sent late, ask for a new approval"; }
+      else {
+        try { await this.gate.execute(it.token, it.action, it.payload, it.run); it.status = "published"; }
+        catch (e) { it.status = "refused"; it.detail = e instanceof GateError ? e.code : "error"; }
+      }
+      done.push({ id: it.id, action: it.action, runAt: it.runAt, status: it.status, detail: it.detail });
+    }
+    return done;
   }
 }
