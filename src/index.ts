@@ -3,3 +3,8 @@ export * as llmRouter from "./llm-router";
 export * as bybitReadonly from "./bybit-readonly";
 export * as safeReach from "./safe-reach";
 export * as igWebhook from "./ig-webhook";
+export * as safeExec from "./safe-exec";
+export * as localIndex from "./local-index";
+export * as skillScanner from "./skill-scanner";
+export * as approvalGate from "./approval-gate";
+export * as launchCheck from "./launch-check";
