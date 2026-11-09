@@ -24,7 +24,14 @@ const fakeNet = (body: string, redirectTo?: string): Deps => ({
 });
 const throws = async (p: Promise<unknown>) => { try { await p; return false; } catch { return true; } };
 const jsonRes = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
-const echo = { commands: { echo: { path: "/bin/echo" } }, env: { PATH: "" }, timeoutMs: 2000 };
+// Portable: the only binary is the running Node itself, and the agent may only supply the DATA argument.
+const PRINT = "console.log(process.argv[1])";
+const echo = {
+  commands: { echo: { path: process.execPath, checkArgs: (a: string[]) => (a.length === 3 && a[0] === "-e" && a[1] === PRINT ? null : "only the fixed print script is allowed") } },
+  env: (process.platform === "win32" ? { SystemRoot: process.env.SystemRoot ?? "" } : {}) as Record<string, string>,
+  timeoutMs: 5000,
+};
+const say = (text: string) => safeExec(echo, "echo", ["-e", PRINT, text]);
 
 export const scenarios: Scenario[] = [
   { module: "safe-fetch", kind: "legit", name: "fetch an allowlisted public API", run: async () => (await safeFetch("https://api.example.com/x", { allowHosts: ["api.example.com"] }, fakeNet("ok"))).status === 200 },
@@ -71,10 +78,12 @@ export const scenarios: Scenario[] = [
   } },
   { module: "ig-webhook", kind: "attack", name: "forged webhook (wrong signature)", run: async () => !verifySignature('{"entry":[]}', "sha256=" + "0".repeat(64), "secret") },
 
-  { module: "safe-exec", kind: "legit", name: "run an allowlisted command", run: async () => (await safeExec(echo, "echo", ["hello"])).stdout.trim() === "hello" },
+  { module: "safe-exec", kind: "legit", name: "run an allowlisted command", run: async () => (await say("hello")).stdout.trim() === "hello" },
   { module: "safe-exec", kind: "attack", name: "shell injection and a non-allowlisted binary", run: async () => {
-    const r = await safeExec(echo, "echo", ["x; touch /tmp/pwned-by-injection"]);
-    return !fs.existsSync("/tmp/pwned-by-injection") && r.stdout.includes("; touch") && (await throws(safeExec(echo, "rm", ["-rf", "/"])));
+    const marker = path.join(os.tmpdir(), "pwned-by-injection");
+    fs.rmSync(marker, { force: true });
+    const r = await say(`x; echo hacked > "${marker}" && whoami | cat`);
+    return !fs.existsSync(marker) && r.stdout.includes("; echo hacked") && (await throws(safeExec(echo, "rm", ["-rf", "/"]))) && (await throws(safeExec(echo, "cmd", ["/c", "dir"])));
   } },
 
   { module: "local-index", kind: "legit", name: "search notes and find the right file", run: async () => {
@@ -113,6 +122,7 @@ export async function pipeline(): Promise<{ ok: boolean; steps: Array<{ step: st
   fs.writeFileSync(path.join(dir, ".env"), "SECRET=never-index-me");
   let posted: string | null = null;
   try {
+   await (async () => {
     // 1 vet the skill before loading it
     mark("skill-scanner: vet skill", scanText("SKILL.md", "# Weekly digest\nSummarise notes and a feed.").verdict === "pass");
     // 2 safe-fetch/safe-reach: read a feed through the allowlist
@@ -130,7 +140,7 @@ export async function pipeline(): Promise<{ ok: boolean; steps: Array<{ step: st
     const draft = await router.complete(`Write a digest from: ${hits[0]!.snippet} | ${items[0]!.title}`);
     mark("llm-router: draft with redaction", !sentToLlm.includes("dana@example.com") && draft.text.startsWith("Digest"));
     // 6 safe-exec: format the text with an allowlisted tool
-    const formatted = (await safeExec(echo, "echo", [draft.text])).stdout.trim();
+    const formatted = (await say(draft.text)).stdout.trim();
     mark("safe-exec: format", formatted === draft.text);
     // 7 approval-gate: the post goes out only after a human approves this exact text
     const gate = new ApprovalGate("a-long-enough-secret"); const payload = { channel: "instagram", text: formatted };
@@ -146,6 +156,9 @@ export async function pipeline(): Promise<{ ok: boolean; steps: Array<{ step: st
     mark("ig-webhook: verified DM reply", out[0] === "replied" && replies[0] === "329");
     // 9 launch-check: gate the release on the project's own migrations
     mark("launch-check: release gate", verdict(scanProject([{ path: "m.sql", text: "create table public.digest (id int);\nalter table public.digest enable row level security;" }])) === "pass");
+   })();
+  } catch (e) {
+    mark(`stopped: ${(e as Error).message}`, false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

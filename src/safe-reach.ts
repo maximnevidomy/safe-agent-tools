@@ -44,3 +44,27 @@ export async function readFeed(url: string, allowHosts: string[], deps: Deps = d
     };
   });
 }
+
+// README as plain text from the official API (raw media type). Capped, never executed or rendered.
+export async function githubReadme(owner: string, repo: string, opts: { token?: string } = {}, deps: Deps = defaultDeps): Promise<string> {
+  if (!OWNER.test(owner) || !REPO.test(repo) || repo === "." || repo === "..") throw new Error("invalid owner/repo");
+  const headers: Record<string, string> = { Accept: "application/vnd.github.raw+json", "User-Agent": "safe-agent-tools" };
+  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  const r = await safeFetch(`https://api.github.com/repos/${owner}/${repo}/readme`, { allowHosts: ["api.github.com"], maxBytes: 300_000, headers }, deps);
+  if (r.status === 404) return "";
+  if (r.status !== 200) throw new Error(`GitHub HTTP ${r.status}`);
+  return r.body.toString("utf8");
+}
+
+// Turn the signals we care about (license, activity, archive state, README content) into one verdict.
+export function vetRepo(meta: { stars: number; license: string | null; pushed_at: string; archived: boolean }, readmeFindings: Array<{ severity: string; rule: string }>, now = Date.now()) {
+  const signals: Array<{ level: "bad" | "warn" | "ok"; text: string }> = [];
+  const days = Math.floor((now - Date.parse(meta.pushed_at)) / 86_400_000);
+  if (meta.archived) signals.push({ level: "bad", text: "repository is archived" });
+  if (!meta.license || meta.license === "NOASSERTION") signals.push({ level: "bad", text: "no clear license" }); else signals.push({ level: "ok", text: `license ${meta.license}` });
+  if (Number.isFinite(days)) signals.push({ level: days > 180 ? "bad" : days > 90 ? "warn" : "ok", text: `last push ${days} days ago` });
+  if (meta.stars < 20) signals.push({ level: "warn", text: `only ${meta.stars} stars (young or unproven)` });
+  for (const f of readmeFindings.filter((x) => x.severity === "high")) signals.push({ level: "bad", text: `README risk: ${f.rule}` });
+  const verdict = signals.some((s) => s.level === "bad") ? "reject" : signals.some((s) => s.level === "warn") ? "review" : "ok";
+  return { verdict, signals };
+}

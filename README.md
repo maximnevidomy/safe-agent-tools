@@ -2,11 +2,27 @@
 
 Hardened rebuilds of ten popular "agent tool" ideas that are useful but weak on security, plus one showcase
 project that chains all ten in a single agent run and proves each works and each attack is stopped.
-TypeScript, zero runtime dependencies, 127 tests, `npm audit` clean.
+TypeScript, zero runtime dependencies, 146 tests, `npm audit` clean.
 
 ![demo](docs/demo.png)
 
-**See it run:** `npm run demo`, then open http://127.0.0.1:4173 (local only). One click runs all 20 checks and the agent pipeline live, and you can paste your own URL, text, skill or SQL into the four playgrounds.
+## Run the app
+```
+npm ci
+npm run demo
+```
+Open http://127.0.0.1:4173. Two tabs:
+- **Use it (live):** vet a real GitHub repo (license, activity, README scan), read real Bybit prices with no key, fetch URLs with SSRF protection, scan your real project folders (launch check, skill scan, local search), and run the approval-gate flow for posts.
+- **Self-check:** 20 tests (one legitimate use and one attack per module) plus a 9-step agent pipeline.
+
+Folders the app may scan are limited to `DEMO_ROOTS` (default: the parent of this repo).
+Windows PowerShell: `$env:DEMO_ROOTS="C:\Users\you\projects"; npm run demo`. macOS/Linux: `DEMO_ROOTS=~/projects npm run demo`.
+
+Optional environment variables: `GITHUB_TOKEN` (higher API limits), `IG_APP_SECRET` and `IG_VERIFY_TOKEN` (enable the Instagram webhook at `/webhook/instagram`), `GATE_SECRET` (stable approval secret), `PORT`.
+
+The app protects itself: 127.0.0.1 only, Host-header check against DNS rebinding, a per-run token on every API call, folder access confined to `DEMO_ROOTS` (symlink safe), capped request bodies, results rendered as text only.
+
+![live app](docs/demo.png)
 
 **Proof, not claims:** run `npm run showcase` and read [SHOWCASE_REPORT.md](SHOWCASE_REPORT.md): 10/10 legitimate uses work, 10/10 attacks are stopped, and a 9-step end-to-end pipeline passes.
 
@@ -42,3 +58,9 @@ npm run showcase
 ## Safety score (measured, not claimed)
 CI runs on every push: tests, typecheck, `npm audit`, CodeQL, and OpenSSF Scorecard. Dependabot keeps
 dev dependencies current. The attack tests in `test/` are the executable part of the threat model.
+
+## Verification status
+- Verified by automated tests (146): all ten modules, the app's endpoints, the webhook endpoint (signature, replay, opt-out), and the real HTTPS transport (TLS name check, pinned IP, size cap, timeout) against a local TLS server.
+- Verified in a real browser: the live tab on a real project folder, the approval flow, the self-check tab.
+- Not verified from the build environment (no outbound internet there): live calls to the GitHub and Bybit APIs. Run the two cards once on your machine to confirm.
+- Not built: real sending of Instagram replies (needs a Meta Page token and app review; replies are logged to `data/outbox.jsonl`), a live LLM provider for `llm-router`.

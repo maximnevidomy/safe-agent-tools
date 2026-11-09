@@ -3,6 +3,7 @@
 // a path), no shell so metacharacters are inert, argument count/length/NUL checks, optional per-command argument
 // rules, a scrubbed environment (secrets are not inherited), a hard timeout and an output cap.
 import { spawn } from "node:child_process";
+import path from "node:path";
 
 export interface CommandSpec {
   path: string; // absolute path to the binary
@@ -26,7 +27,7 @@ export function safeExec(policy: ExecPolicy, name: string, args: string[] = []):
     return Promise.reject(new ExecError("not_allowed", `command "${String(name).slice(0, 40)}" is not allowlisted`));
   }
   const spec = policy.commands[name]!;
-  if (!spec.path.startsWith("/")) return Promise.reject(new ExecError("bad_policy", "command path must be absolute"));
+  if (!path.isAbsolute(spec.path)) return Promise.reject(new ExecError("bad_policy", "command path must be absolute"));
   if (!Array.isArray(args) || args.some((a) => typeof a !== "string")) return Promise.reject(new ExecError("bad_args", "args must be strings"));
   if (args.length > (spec.maxArgs ?? 16)) return Promise.reject(new ExecError("bad_args", "too many arguments"));
   if (args.some((a) => a.length > 2000 || a.includes("\0"))) return Promise.reject(new ExecError("bad_args", "argument too long or contains NUL"));
