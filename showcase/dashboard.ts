@@ -16,7 +16,7 @@ export function gitMeta(): DashboardMeta {
   return { generatedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC", commit };
 }
 
-export async function buildDashboard(meta: DashboardMeta = gitMeta()): Promise<string> {
+export async function buildDashboard(meta: DashboardMeta = gitMeta(), fragment = false): Promise<string> {
   const [scores, ex] = await Promise.all([runAttacks(), examples()]);
   const ids = TOOLS.map((t) => t.id) as ToolId[];
   const avg = (k: "naiveScore" | "safeScore") => Math.round(ids.reduce((a, i) => a + scores[i][k], 0) / ids.length);
@@ -43,12 +43,15 @@ ${e.simulated ? `<p class="muted">Simulated in this example: ${esc(e.simulated)}
   }).join("\n");
 
   const nav = TOOLS.map((t) => `<a href="#${t.id}">${esc(t.name)} <b class="${tone(scores[t.id].safeScore)}">${scores[t.id].safeScore}</b></a>`).join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>safe-agent-tools: security dashboard</title>
+  const head = fragment ? "" : `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`;
+  const open = fragment ? "" : `</head><body>`, close = fragment ? "" : `</body></html>`;
+  return `${head}<title>Safe Agent Tools</title><meta name="claude:viewport-fit-sides" content="cover">
 <style>
-:root{--bg:#0f1115;--fg:#e8eaee;--mut:#9aa3b2;--card:#171a21;--line:#262b36;--good:#2fbf71;--mid:#e0a526;--low:#e5534b;--acc:#6ea8fe}
-@media (prefers-color-scheme:light){:root{--bg:#f6f7f9;--fg:#15181e;--mut:#5a6372;--card:#fff;--line:#dde1e8;--acc:#1d5fd0}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
-main{max-width:980px;margin:0 auto;padding:24px 16px 64px}a{color:var(--acc)}h1{font-size:1.9rem;margin:.2em 0}h2{font-size:1.35rem;margin:0 0 .6em}h2 small{display:block;font-weight:400;color:var(--mut);font-size:.95rem}h3{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:1.3em 0 .4em}
+:root{--bg:#0f1115;--fg:#e8eaee;--mut:#9aa3b2;--card:#171a21;--line:#262b36;--good:#2fbf71;--mid:#e0a526;--low:#e5534b;--acc:#6ea8fe;color-scheme:dark}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f7f9;--fg:#15181e;--mut:#5a6372;--card:#fff;--line:#dde1e8;--acc:#1d5fd0;--good:#16864a;--mid:#946a00;--low:#c0332b;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f6f7f9;--fg:#15181e;--mut:#5a6372;--card:#fff;--line:#dde1e8;--acc:#1d5fd0;--good:#16864a;--mid:#946a00;--low:#c0332b;color-scheme:light}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif;padding-block:24px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:980px;margin:0 auto}a{color:var(--acc)}h1{font-size:1.9rem;margin:.2em 0}h2{font-size:1.35rem;margin:0 0 .6em}h2 small{display:block;font-weight:400;color:var(--mut);font-size:.95rem}h3{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:1.3em 0 .4em}
 .n{display:inline-grid;place-items:center;width:1.7em;height:1.7em;border-radius:50%;background:var(--line);margin-right:.5em;font-size:.85em}
 .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:18px 0}.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}.stat b{font-size:2rem;display:block}
 .good{color:var(--good)}.mid{color:var(--mid)}.low{color:var(--low)}.muted{color:var(--mut);font-size:.9rem}
@@ -61,7 +64,7 @@ table{width:100%;border-collapse:collapse;font-size:.92rem}th,td{text-align:left
 .ex{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:.85rem;margin:.3em 0}
 .note{border-left:4px solid var(--mid);background:var(--card);padding:12px 16px;border-radius:0 10px 10px 0;margin:16px 0}li{margin:.2em 0}
 @media (max-width:560px){.bar{grid-template-columns:1fr 1fr 48px}.bar .bl{grid-column:1/-1}}
-</style></head><body><main>
+</style>${open}<main>
 <h1>safe-agent-tools</h1>
 <p>Ten open-source agent-tool ideas, rebuilt with security first. Each section shows the original, its problem, a security score before and after, and a live example.</p>
 <div class="hero"><div class="stat"><b class="low">${avg("naiveScore")}%</b>average score, naive baseline</div><div class="stat"><b class="good">${avg("safeScore")}%</b>average score, our tools</div><div class="stat"><b>${totalAttacks}</b>attack attempts run</div><div class="stat"><b>${falseAlarms}</b>false alarms on ${BENIGN_SKILLS.length} harmless skills</div></div>
@@ -69,5 +72,5 @@ table{width:100%;border-collapse:collapse;font-size:.92rem}th,td{text-align:left
 <nav>${nav}</nav>
 ${sections}
 <p class="muted">Generated ${esc(meta.generatedAt)} · commit ${esc(meta.commit)} · static page, no scripts, no tracking.</p>
-</main></body></html>`;
+</main>${close}`;
 }

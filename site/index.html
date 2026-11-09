@@ -1,9 +1,10 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>safe-agent-tools: security dashboard</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Safe Agent Tools</title><meta name="claude:viewport-fit-sides" content="cover">
 <style>
-:root{--bg:#0f1115;--fg:#e8eaee;--mut:#9aa3b2;--card:#171a21;--line:#262b36;--good:#2fbf71;--mid:#e0a526;--low:#e5534b;--acc:#6ea8fe}
-@media (prefers-color-scheme:light){:root{--bg:#f6f7f9;--fg:#15181e;--mut:#5a6372;--card:#fff;--line:#dde1e8;--acc:#1d5fd0}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
-main{max-width:980px;margin:0 auto;padding:24px 16px 64px}a{color:var(--acc)}h1{font-size:1.9rem;margin:.2em 0}h2{font-size:1.35rem;margin:0 0 .6em}h2 small{display:block;font-weight:400;color:var(--mut);font-size:.95rem}h3{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:1.3em 0 .4em}
+:root{--bg:#0f1115;--fg:#e8eaee;--mut:#9aa3b2;--card:#171a21;--line:#262b36;--good:#2fbf71;--mid:#e0a526;--low:#e5534b;--acc:#6ea8fe;color-scheme:dark}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#f6f7f9;--fg:#15181e;--mut:#5a6372;--card:#fff;--line:#dde1e8;--acc:#1d5fd0;--good:#16864a;--mid:#946a00;--low:#c0332b;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f6f7f9;--fg:#15181e;--mut:#5a6372;--card:#fff;--line:#dde1e8;--acc:#1d5fd0;--good:#16864a;--mid:#946a00;--low:#c0332b;color-scheme:light}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif;padding-block:24px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:980px;margin:0 auto}a{color:var(--acc)}h1{font-size:1.9rem;margin:.2em 0}h2{font-size:1.35rem;margin:0 0 .6em}h2 small{display:block;font-weight:400;color:var(--mut);font-size:.95rem}h3{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:1.3em 0 .4em}
 .n{display:inline-grid;place-items:center;width:1.7em;height:1.7em;border-radius:50%;background:var(--line);margin-right:.5em;font-size:.85em}
 .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:18px 0}.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}.stat b{font-size:2rem;display:block}
 .good{color:var(--good)}.mid{color:var(--mid)}.low{color:var(--low)}.muted{color:var(--mut);font-size:.9rem}
@@ -187,5 +188,5 @@ line 2 [high] anon-write-grant: anon can change or delete rows</pre></div></div>
 <p class="muted">Nothing simulated: the real module ran on this machine.</p>
 <h3>Still not covered</h3><ul class="muted"><li>It reads the migration history, not the live database: run it next to a live advisor check</li></ul>
 </section>
-<p class="muted">Generated 2026-11-09 08:30 UTC · commit 62f7555 · static page, no scripts, no tracking.</p>
+<p class="muted">Generated 2026-11-09 09:42 UTC · commit 13ade50 · static page, no scripts, no tracking.</p>
 </main></body></html>
