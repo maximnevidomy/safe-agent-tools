@@ -109,7 +109,12 @@ export const TRY: TryDef[] = [
         const v = vetRepo(meta, scanText("README", readme).findings);
         const out: TryOut = { verdict: "allowed", headline: `Verdict: ${v.verdict.toUpperCase()}`, rows: [["Repo", meta.full_name], ...v.signals.map((s) => [s.level.toUpperCase(), s.text] as [string, string])] };
         c.cache.set(key, { at: Date.now(), v: out }); if (c.cache.size > 200) c.cache.delete(c.cache.keys().next().value!); return out;
-      } catch (e) { return /invalid owner\/repo/.test((e as Error).message) ? blocked("Refused: not a valid owner/name.") : { verdict: "info", headline: "GitHub did not return that repo (it may not exist, or the shared rate limit is used up).", rows: [] }; }
+      } catch (e) {
+        const msg = (e as Error).message; console.error("safe-reach:", msg.slice(0, 120));
+        if (/invalid owner\/repo/.test(msg)) return blocked("Refused: not a valid owner/name.");
+        if (/HTTP 40[34]|HTTP 429/.test(msg)) return { verdict: "info", headline: /HTTP 404/.test(msg) ? "GitHub has no public repo with that name." : "GitHub's anonymous rate limit for this server is used up. Try again in a few minutes.", rows: [["Detail", msg]] };
+        return { verdict: "info", headline: "GitHub did not answer. Try again in a moment.", rows: [["Detail", msg.slice(0, 120)]] };
+      }
     } },
 
   { id: "ig-webhook", network: false, button: "Deliver", intro: "A simulated Instagram message arrives at the webhook. Pick what happens. The signature check and decision logic are the real code; no Instagram account is involved.",

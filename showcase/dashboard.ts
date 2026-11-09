@@ -91,6 +91,6 @@ button[type=submit]{justify-self:start;font:inherit;font-weight:600;background:v
 ${live ? `<div class="note"><b>Try everything yourself.</b> Each tool has a live form. Your input is not stored, nothing runs on your computer, and results are shown as plain text. The server holds no secrets and limits how often each visitor can try.</div>` : ""}
 <nav>${nav}</nav>
 ${sections}
-<p class="muted">Generated ${esc(meta.generatedAt)} · commit ${esc(meta.commit)} · static page, no scripts, no tracking.</p>
+<p class="muted">Generated ${esc(meta.generatedAt)} · commit ${esc(meta.commit)} · ${live ? "no tracking, no cookies, nothing you type is stored." : "static page, no scripts, no tracking."}</p>
 </main>${live ? `<script src="/app.js"></script>` : ""}${close}`;
 }
