@@ -3,6 +3,7 @@
 import { execSync } from "node:child_process";
 import { BENIGN_SKILLS, benignFalseAlarms, runAttacks, type AttackResult, type ToolId } from "./attacks";
 import { examples } from "./examples";
+import { COMPARE } from "./compare";
 import { TOOLS } from "./originals";
 import { TRY_BY_ID, type Field } from "./try";
 
@@ -30,6 +31,10 @@ const tryForm = (id: ToolId) => {
   return `<h3>Try it yourself (live)</h3><form class="try" data-tool="${id}" autocomplete="off"><p class="muted">${esc(d.intro)}</p>${d.fields.map(field).join("")}<button type="submit">${esc(d.button)}</button><div class="out" aria-live="polite"></div></form>`;
 };
 
+const CMP_LABEL: Record<string, [string, string]> = { better: ["Ours is stronger", "ok"], same: ["About equal", "ok"], partial: ["Partly there", "mid"], missing: ["Not built", "bad"], "by-design": ["Left out on purpose", "na"] };
+const compareTable = (id: ToolId, orig: string, name: string) =>
+  `<h3>${esc(orig)} vs ${esc(name)}</h3><div class="cmpwrap"><table class="cmp"><thead><tr><th>Capability</th><th>Where we stand</th><th>${esc(orig)}</th><th>${esc(name)}</th></tr></thead><tbody>${(COMPARE[id] ?? []).map((r) => { const [l, c] = CMP_LABEL[r.status]!; return `<tr><td>${esc(r.what)}</td><td class="${c}">${l}</td><td>${esc(r.original)}</td><td>${esc(r.ours)}</td></tr>`; }).join("")}</tbody></table></div>`;
+
 export async function buildDashboard(meta: DashboardMeta = gitMeta(), fragment = false, live = false): Promise<string> {
   const [scores, ex] = await Promise.all([runAttacks(), examples()]);
   const ids = TOOLS.map((t) => t.id) as ToolId[];
@@ -48,6 +53,7 @@ export async function buildDashboard(meta: DashboardMeta = gitMeta(), fragment =
 <div><h3>The original idea</h3><p><a href="${esc(t.original.url)}" rel="noopener noreferrer">${esc(t.original.name)}</a>${also}</p><p class="muted">From the tool library review: trust ${t.original.libraryTrust}/100 · ${esc(t.original.libraryStatus)}.<br>${esc(t.original.libraryNote)}</p></div>
 <div><h3>The problem</h3><p>${esc(t.problem)}</p></div>
 </div>
+${compareTable(t.id, t.original.name, t.name)}
 <h3>What we changed</h3><ul>${t.changes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul>
 <h3>Attacks, before vs after</h3><table><thead><tr><th>Attack</th><th>Simple version</th><th>${esc(t.name)}</th></tr></thead><tbody>${rows}</tbody></table>
 ${live ? tryForm(t.id) : ""}
@@ -75,7 +81,7 @@ section{background:var(--card);border:1px solid var(--line);border-radius:14px;p
 .bar{display:grid;grid-template-columns:260px 1fr 56px;align-items:center;gap:10px;margin:6px 0}.track{height:14px;background:var(--line);border-radius:7px;overflow:hidden}.fill{height:100%}.fill.good{background:var(--good)}.fill.mid{background:var(--mid)}.fill.low{background:var(--low)}.bar b{text-align:right}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
 table{width:100%;border-collapse:collapse;font-size:.92rem}th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}th{color:var(--mut);font-weight:600}
-.ok{color:var(--good);font-weight:600}.bad{color:var(--low);font-weight:600}.na{color:var(--mut)}
+.cmpwrap{overflow-x:auto}.cmp{min-width:560px}.cmp td:first-child{font-weight:600}.cmp td{vertical-align:top}.ok{color:var(--good);font-weight:600}.bad{color:var(--low);font-weight:600}.na{color:var(--mut)}
 .ex{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:.85rem;margin:.3em 0}
 form.try{display:grid;gap:12px}.fld{display:grid;gap:4px}label{font-size:.85rem;color:var(--mut)}input,textarea,select{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}textarea{font-family:ui-monospace,Consolas,monospace;font-size:.85rem}
 button[type=submit]{justify-self:start;font:inherit;font-weight:600;background:var(--acc);color:var(--bg);border:0;border-radius:8px;padding:9px 18px;cursor:pointer}button:disabled{opacity:.6;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
